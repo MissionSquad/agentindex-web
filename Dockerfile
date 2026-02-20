@@ -13,7 +13,10 @@ RUN --mount=type=cache,target=/usr/local/share/.cache/yarn/$TARGETARCH,sharing=l
 COPY . .
 RUN yarn build
 
-# Production stage — Astro standalone server only needs the dist output
+# Remove devDependencies
+RUN yarn install --frozen-lockfile --production --ignore-scripts
+
+# Production stage
 FROM node:20-slim
 
 WORKDIR /app
@@ -21,6 +24,8 @@ ENV NODE_ENV=production
 ENV HOST=0.0.0.0
 ENV PORT=4321
 
+COPY --from=build /app/package.json ./
+COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
 
 EXPOSE 4321
