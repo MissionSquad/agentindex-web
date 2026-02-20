@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed, onMounted, ref } from "vue";
 import AsyncStateGate from "../shared/AsyncStateGate.vue";
 import { ScannerApiClient } from "../../lib/api-client";
 import { classifySearchInput } from "../../lib/query";
@@ -57,6 +57,15 @@ const runSearch = async (): Promise<void> => {
 
   await state.refresh();
 };
+
+onMounted(() => {
+  const params = new URLSearchParams(window.location.search);
+  const q = params.get("q");
+  if (q) {
+    searchInput.value = q;
+    void runSearch();
+  }
+});
 </script>
 
 <template>

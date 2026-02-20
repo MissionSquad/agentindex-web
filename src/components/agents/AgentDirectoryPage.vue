@@ -1,10 +1,12 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, watch } from "vue";
+import { computed, onMounted, reactive, ref, watch } from "vue";
 import AsyncStateGate from "../shared/AsyncStateGate.vue";
 import CopyButton from "../shared/CopyButton.vue";
 import { ScannerApiClient } from "../../lib/api-client";
 import { formatAddress, formatNumber, formatTimestamp } from "../../lib/formatters";
 import { useAsyncView } from "../../lib/view-state";
+import { resolveAgentUri, needsAsyncDataResolve, resolveDataUriAsync } from "../../lib/uri-resolver";
+import { extractAgentUriMetadata } from "../../lib/uri-metadata";
 import type { AgentSort, PaginatedResult, AgentSummary } from "../../types/api";
 
 const api = ScannerApiClient.fromEnv();
@@ -42,7 +44,6 @@ const headers = [
   { title: "Avg Reputation", key: "averageReputation" },
   { title: "Registered", key: "registrationTimestamp" },
   { title: "Transferred", key: "hasBeenTransferred" },
-  { title: "Actions", key: "actions", sortable: false },
 ];
 
 function mapToggle(value: "all" | "yes" | "no"): boolean | undefined {
@@ -102,6 +103,59 @@ watch(
 onMounted(() => {
   void state.refresh();
 });
+
+// Resolve agent URIs for each agent to extract JSON-derived names
+const FETCHABLE_SCHEMES = new Set<string>(["http", "ipfs"]);
+const agentNameMap = ref(new Map<string, string>());
+
+watch(
+  () => state.data.value?.items,
+  async (agents) => {
+    if (!agents || agents.length === 0) return;
+
+    const map = new Map<string, string>();
+
+    await Promise.all(
+      agents.map(async (agent) => {
+        if (!agent.agentUri) {
+          map.set(agent.agentId, agent.name);
+          return;
+        }
+
+        let resolved = resolveAgentUri(agent.agentUri);
+
+        if (needsAsyncDataResolve(resolved)) {
+          try {
+            resolved = await resolveDataUriAsync(agent.agentUri);
+          } catch {
+            // fallback
+          }
+        }
+
+        if (FETCHABLE_SCHEMES.has(resolved.scheme) && resolved.decoded === null) {
+          try {
+            const fetched = await api.resolveUri(resolved.raw);
+            if (fetched.contentType === "application/json" && fetched.body !== null) {
+              resolved = { scheme: resolved.scheme, raw: resolved.raw, decoded: fetched.body, error: null };
+            }
+          } catch {
+            // fallback
+          }
+        }
+
+        const metadata = extractAgentUriMetadata(resolved.decoded);
+        map.set(agent.agentId, metadata.name ?? agent.name);
+      }),
+    );
+
+    agentNameMap.value = map;
+  },
+  { immediate: true },
+);
+
+function resolvedAgentName(agent: AgentSummary): string {
+  return agentNameMap.value.get(agent.agentId) ?? agent.name;
+}
 </script>
 
 <template>
@@ -211,6 +265,10 @@ onMounted(() => {
           density="comfortable"
           hide-default-footer
         >
+          <template #item.name="{ item }">
+            <a :href="`/agents/${item.agentId}`" class="agent-link">{{ resolvedAgentName(item) }}</a>
+          </template>
+
           <template #item.ownerAddress="{ item }">
             <a :href="`/address/${item.ownerAddress}`">{{ formatAddress(item.ownerAddress) }}</a>
             <CopyButton :value="item.ownerAddress" />
@@ -228,9 +286,6 @@ onMounted(() => {
             <v-chip :color="item.hasBeenTransferred ? 'warning' : 'success'" size="small">
               {{ item.hasBeenTransferred ? "Yes" : "No" }}
             </v-chip>
-          </template>
-          <template #item.actions="{ item }">
-            <a :href="`/agents/${item.agentId}`">Open</a>
           </template>
         </v-data-table>
 
@@ -260,3 +315,14 @@ onMounted(() => {
     </AsyncStateGate>
   </section>
 </template>
+
+<style scoped>
+.agent-link {
+  color: var(--color-link);
+  text-decoration: none;
+}
+
+.agent-link:hover {
+  text-decoration: underline;
+}
+</style>

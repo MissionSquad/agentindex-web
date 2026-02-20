@@ -347,6 +347,21 @@ const selectedNodeMetaRows = computed<Array<{ key: string; value: string }>>(() 
   }));
 });
 
+function edgeNodeDisplayName(nodeId: string): string {
+  const node = renderedNodes.value[nodeId];
+  if (node) {
+    return toNodeLabel(node);
+  }
+
+  const agentId = parseAgentIdFromNodeId(nodeId);
+  if (agentId) return `Agent ${agentId}`;
+
+  const address = parseAddressFromNodeId(nodeId);
+  if (address) return formatAddress(address);
+
+  return nodeId;
+}
+
 const edgeHeaders = [
   { title: "Source", key: "source" },
   { title: "Target", key: "target" },
@@ -537,19 +552,19 @@ const edgeHeaders = [
       <v-data-table :headers="edgeHeaders" :items="filteredEdgeRows" class="mt-4" density="comfortable">
         <template #item.source="{ item }">
           <a v-if="parseAddressFromNodeId(item.source)" :href="`/address/${parseAddressFromNodeId(item.source)}`">
-            {{ formatAddress(parseAddressFromNodeId(item.source)) }}
+            {{ edgeNodeDisplayName(item.source) }}
           </a>
           <a v-else-if="parseAgentIdFromNodeId(item.source)" :href="`/agents/${parseAgentIdFromNodeId(item.source)}`">
-            Agent {{ parseAgentIdFromNodeId(item.source) }}
+            {{ edgeNodeDisplayName(item.source) }}
           </a>
           <span v-else>{{ item.source }}</span>
         </template>
         <template #item.target="{ item }">
           <a v-if="parseAgentIdFromNodeId(item.target)" :href="`/agents/${parseAgentIdFromNodeId(item.target)}`">
-            Agent {{ parseAgentIdFromNodeId(item.target) }}
+            {{ edgeNodeDisplayName(item.target) }}
           </a>
           <a v-else-if="parseAddressFromNodeId(item.target)" :href="`/address/${parseAddressFromNodeId(item.target)}`">
-            {{ formatAddress(parseAddressFromNodeId(item.target)) }}
+            {{ edgeNodeDisplayName(item.target) }}
           </a>
           <span v-else>{{ item.target }}</span>
         </template>

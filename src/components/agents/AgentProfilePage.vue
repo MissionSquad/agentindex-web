@@ -13,7 +13,7 @@ import type { ResolvedUri } from "../../lib/uri-resolver";
 import { extractAgentUriMetadata } from "../../lib/uri-metadata";
 import { loadAgentProfileForRoute } from "../../lib/route-loaders";
 import { useAsyncView } from "../../lib/view-state";
-import type { AgentProfileResponse } from "../../types/api";
+import type { AgentProfileResponse, FeedbackEntry } from "../../types/api";
 
 const props = defineProps<{
   agentId: string;
@@ -124,13 +124,10 @@ const heuristicTiles = computed(() => {
 const feedbackHeaders = [
   { title: "Client", key: "clientAddress" },
   { title: "Value", key: "normalizedValue" },
-  { title: "Tag1", key: "tag1" },
-  { title: "Tag2", key: "tag2" },
+  { title: "Tags", key: "tags" },
   { title: "Endpoint", key: "endpoint" },
-  { title: "Feedback URI", key: "feedbackUri" },
-  { title: "Integrity", key: "integrity" },
+  { title: "Feedback", key: "feedbackUri" },
   { title: "Revoked", key: "revoked" },
-  { title: "Revoked At", key: "revokedAt" },
   { title: "Responses", key: "responseCount" },
   { title: "Timestamp", key: "timestamp" },
   { title: "Tx", key: "txHash" },
@@ -144,7 +141,105 @@ const responseHeaders = [
   { title: "Tx", key: "txHash" },
 ];
 
+// Resolve feedback URIs to extract a display value (mirrors response pattern on reputation page)
+const feedbackValueMap = ref(new Map<string, string>());
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function extractFeedbackField(decoded: unknown): string | null {
+  if (!isRecord(decoded)) return null;
+  for (const key of ["feedback", "comment", "message", "text", "review", "response"]) {
+    const v = decoded[key];
+    if (typeof v === "string" && v.length > 0) return v;
+  }
+  return null;
+}
+
+watch(
+  () => state.data.value?.feedback.items,
+  async (items) => {
+    if (!items || items.length === 0) return;
+
+    const map = new Map<string, string>();
+
+    await Promise.all(
+      items.map(async (entry) => {
+        if (!entry.feedbackUri) return;
+
+        const key = entry.feedbackId;
+        let resolved = resolveAgentUri(entry.feedbackUri);
+
+        if (needsAsyncDataResolve(resolved)) {
+          try {
+            resolved = await resolveDataUriAsync(entry.feedbackUri);
+          } catch {
+            return;
+          }
+        }
+
+        if (FETCHABLE_SCHEMES.has(resolved.scheme) && resolved.decoded === null && !resolved.error) {
+          try {
+            const fetched = await api.resolveUri(resolved.raw);
+            if (fetched.contentType === "application/json" && fetched.body !== null) {
+              resolved = { scheme: resolved.scheme, raw: resolved.raw, decoded: fetched.body, error: null };
+            }
+          } catch {
+            return;
+          }
+        }
+
+        const text = extractFeedbackField(resolved.decoded);
+        if (text) {
+          map.set(key, text);
+        }
+      }),
+    );
+
+    feedbackValueMap.value = map;
+  },
+  { immediate: true },
+);
+
+function resolvedFeedbackText(entry: FeedbackEntry): string | null {
+  return feedbackValueMap.value.get(entry.feedbackId) ?? null;
+}
+
+function truncateText(text: string, maxLength: number): string {
+  if (text.length <= maxLength) return text;
+  return `${text.slice(0, maxLength)}...`;
+}
+
+function formatTags(entry: FeedbackEntry): string {
+  const parts = [entry.tag1, entry.tag2].filter((t) => t.length > 0);
+  return parts.length > 0 ? parts.join(", ") : "";
+}
+
+interface SummarySegment {
+  type: "text" | "address";
+  value: string;
+}
+
+function parseSummary(text: string): SummarySegment[] {
+  const segments: SummarySegment[] = [];
+  let lastIndex = 0;
+
+  for (const match of text.matchAll(/0x[a-fA-F0-9]{40}/g)) {
+    const idx = match.index!;
+    if (idx > lastIndex) {
+      segments.push({ type: "text", value: text.slice(lastIndex, idx) });
+    }
+    segments.push({ type: "address", value: match[0] });
+    lastIndex = idx + match[0].length;
+  }
+
+  if (lastIndex < text.length) {
+    segments.push({ type: "text", value: text.slice(lastIndex) });
+  }
+
+  return segments;
+}
 </script>
 
 <template>
@@ -305,6 +400,12 @@ const responseHeaders = [
               ]"
               :items="state.data.value?.transactionHistory ?? []"
             >
+              <template #item.summary="{ item }">
+                <template v-for="(seg, i) in parseSummary(item.summary)" :key="i">
+                  <a v-if="seg.type === 'address'" :href="`/address/${seg.value.toLowerCase()}`">{{ formatAddress(seg.value) }}</a>
+                  <span v-else>{{ seg.value }}</span>
+                </template>
+              </template>
               <template #item.timestamp="{ item }">{{ formatTimestamp(item.timestamp) }}</template>
               <template #item.txHash="{ item }"><a :href="`/tx/${item.txHash}`">{{ formatTxHash(item.txHash) }}</a> <CopyButton :value="item.txHash" /></template>
             </v-data-table>
@@ -390,20 +491,22 @@ const responseHeaders = [
                 <CopyButton :value="item.clientAddress" />
               </template>
               <template #item.normalizedValue="{ item }">{{ formatNumber(item.normalizedValue) }}</template>
+              <template #item.tags="{ item }">{{ formatTags(item) }}</template>
               <template #item.feedbackUri="{ item }">
                 <template v-if="item.feedbackUri">
-                  <span class="uri-cell" @click="uriOverlay?.open(item.feedbackUri)">open</span>
-                  <CopyButton :value="item.feedbackUri" />
+                  <span class="feedback-text">{{ resolvedFeedbackText(item) ? truncateText(resolvedFeedbackText(item)!, 20) : "..." }}</span>
+                  <v-btn
+                    icon="mdi-dock-window"
+                    variant="text"
+                    size="x-small"
+                    density="compact"
+                    class="overlay-btn"
+                    @click="uriOverlay?.open(item.feedbackUri)"
+                  />
                 </template>
                 <span v-else>-</span>
               </template>
-              <template #item.integrity="{ item }">
-                <v-chip :color="item.integrity === 'pass' ? 'success' : item.integrity === 'fail' ? 'error' : 'default'" size="small">
-                  {{ item.integrity }}
-                </v-chip>
-              </template>
-              <template #item.revoked="{ item }">{{ item.revoked ? "Yes" : "No" }}</template>
-              <template #item.revokedAt="{ item }">{{ formatTimestamp(item.revokedAt) }}</template>
+              <template #item.revoked="{ item }">{{ item.revoked ? formatTimestamp(item.revokedAt) : "No" }}</template>
               <template #item.timestamp="{ item }">{{ formatTimestamp(item.timestamp) }}</template>
               <template #item.txHash="{ item }"><a :href="`/tx/${item.txHash}`">{{ formatTxHash(item.txHash) }}</a> <CopyButton :value="item.txHash" /></template>
             </v-data-table>
@@ -669,5 +772,25 @@ const responseHeaders = [
 
 .uri-cell:hover {
   text-decoration: underline;
+}
+
+.feedback-text {
+  font-family: "JetBrains Mono", "Fira Code", monospace;
+  font-size: 0.82rem;
+  color: var(--color-text-secondary);
+}
+
+.overlay-btn {
+  opacity: 0.45;
+  transition: opacity 0.15s ease;
+  margin-left: 4px;
+  vertical-align: middle;
+  position: relative;
+  top: -2px;
+  flex-shrink: 0;
+}
+
+.overlay-btn:hover {
+  opacity: 1;
 }
 </style>

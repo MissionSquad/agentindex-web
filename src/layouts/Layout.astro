@@ -1,4 +1,5 @@
 ---
+import AgentBackground from "../components/shared/AgentBackground.vue";
 import GlobalNav from "../components/shared/GlobalNav.vue";
 
 interface Props {
@@ -30,6 +31,7 @@ const { title, description = "AgentIndex – Trustless Agent discovery and analy
     </script>
   </head>
   <body>
+    <AgentBackground client:only="vue" particleCount={150} baseVelocity={0.12} friction={0.995} attractionStrength={0.02} />
     <GlobalNav client:load />
     <main class="content-shell">
       <slot />
@@ -104,6 +106,8 @@ const { title, description = "AgentIndex – Trustless Agent discovery and analy
   }
 
   .content-shell {
+    position: relative;
+    z-index: 1;
     max-width: var(--shell-max-width);
     margin: 0 auto;
     padding: 1.25rem;

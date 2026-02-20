@@ -5,7 +5,8 @@ import "vue-json-pretty/lib/styles.css";
 import AsyncStateGate from "../shared/AsyncStateGate.vue";
 import CopyButton from "../shared/CopyButton.vue";
 import { ScannerApiClient } from "../../lib/api-client";
-import { formatKeyValueMap, formatMiddleTruncate, formatTimestamp, formatTxHash } from "../../lib/formatters";
+import { formatKeyValueMap, formatMiddleTruncate, formatTimestamp } from "../../lib/formatters";
+import { isEthereumAddress } from "../../lib/query";
 import { resolveAgentUri } from "../../lib/uri-resolver";
 import type { ResolvedUri } from "../../lib/uri-resolver";
 import { loadTransactionForRoute } from "../../lib/route-loaders";
@@ -23,8 +24,23 @@ const URI_PREFIXES = ["data:", "http://", "https://", "ipfs://"];
 const COPYABLE_ENVELOPE_KEYS = new Set(["Tx Hash", "Registry", "Block Hash", "From", "To"]);
 const TRUNCATABLE_ENVELOPE_KEYS = new Set(["Tx Hash", "Block Hash"]);
 
+const AGENT_ID_KEYS = new Set(["agentId", "tokenId", "_tokenId"]);
+
 function looksLikeUri(value: string): boolean {
-  return URI_PREFIXES.some((p) => value.startsWith(p));
+  return URI_PREFIXES.some((p) => value.startsWith(p)) || value.startsWith("{");
+}
+
+function classifyArgValue(key: string, value: string): "agentId" | "address" | "uri" | "text" {
+  if (AGENT_ID_KEYS.has(key) && /^\d+$/.test(value)) {
+    return "agentId";
+  }
+  if (isEthereumAddress(value)) {
+    return "address";
+  }
+  if (looksLikeUri(value)) {
+    return "uri";
+  }
+  return "text";
 }
 
 const state = useAsyncView<TransactionDetailResponse>(
@@ -66,6 +82,16 @@ const callArgs = computed(() => {
   }
 
   return formatKeyValueMap(call.normalizedArgs);
+});
+
+const formattedEvents = computed(() => {
+  const events = state.data.value?.eventFacts ?? [];
+  return events.map((evt) => ({
+    logIndex: evt.logIndex,
+    eventName: evt.eventName || "Unknown Event",
+    eventSignature: evt.eventSignature,
+    args: formatKeyValueMap(evt.eventArgs),
+  }));
 });
 
 // URI overlay state
@@ -139,27 +165,48 @@ async function openUriOverlay(rawUri: string): Promise<void> {
               {{ state.data.value?.callFact.functionName }} · {{ state.data.value?.callFact.functionSignature }}
             </v-card-subtitle>
             <v-card-text>
-              <v-data-table
-                :headers="[
-                  { title: 'Arg', key: 'key' },
-                  { title: 'Value', key: 'value' },
-                ]"
-                :items="callArgs"
-                density="compact"
-              >
-                <template #item.value="{ item }">
-                  <span
-                    v-if="looksLikeUri(item.value)"
-                    class="uri-cell"
-                    @click="openUriOverlay(item.value)"
-                    :title="item.value"
-                  >
-                    {{ item.value.length > 60 ? item.value.slice(0, 60) + '…' : item.value }}
-                  </span>
-                  <span v-else>{{ item.value }}</span>
-                  <CopyButton :value="item.value" />
-                </template>
-              </v-data-table>
+              <v-table density="compact">
+                <thead><tr><th>Arg</th><th>Value</th></tr></thead>
+                <tbody>
+                  <tr v-for="arg in callArgs" :key="arg.key">
+                    <td class="font-weight-medium">{{ arg.key }}</td>
+                    <td>
+                      <a v-if="classifyArgValue(arg.key, arg.value) === 'agentId'" :href="`/agents/${arg.value}`">{{ arg.value }}</a>
+                      <a v-else-if="classifyArgValue(arg.key, arg.value) === 'address'" :href="`/address/${arg.value.toLowerCase()}`">{{ arg.value }}</a>
+                      <span v-else-if="classifyArgValue(arg.key, arg.value) === 'uri'" class="uri-cell" @click="openUriOverlay(arg.value)" :title="arg.value">
+                        {{ arg.value.length > 60 ? arg.value.slice(0, 60) + '…' : arg.value }}
+                      </span>
+                      <span v-else>{{ arg.value }}</span>
+                      <CopyButton :value="arg.value" />
+                    </td>
+                  </tr>
+                </tbody>
+              </v-table>
+            </v-card-text>
+          </v-card>
+
+          <v-card v-for="evt in formattedEvents" :key="evt.logIndex" border class="mt-3">
+            <v-card-title>{{ evt.eventName }}</v-card-title>
+            <v-card-subtitle>{{ evt.eventSignature }}<template v-if="evt.eventSignature"> · </template>Log #{{ evt.logIndex }}</v-card-subtitle>
+            <v-card-text>
+              <v-table v-if="evt.args.length > 0" density="compact">
+                <thead><tr><th>Arg</th><th>Value</th></tr></thead>
+                <tbody>
+                  <tr v-for="arg in evt.args" :key="arg.key">
+                    <td class="font-weight-medium">{{ arg.key }}</td>
+                    <td>
+                      <a v-if="classifyArgValue(arg.key, arg.value) === 'agentId'" :href="`/agents/${arg.value}`">{{ arg.value }}</a>
+                      <a v-else-if="classifyArgValue(arg.key, arg.value) === 'address'" :href="`/address/${arg.value.toLowerCase()}`">{{ arg.value }}</a>
+                      <span v-else-if="classifyArgValue(arg.key, arg.value) === 'uri'" class="uri-cell" @click="openUriOverlay(arg.value)" :title="arg.value">
+                        {{ arg.value.length > 60 ? arg.value.slice(0, 60) + '…' : arg.value }}
+                      </span>
+                      <span v-else>{{ arg.value }}</span>
+                      <CopyButton :value="arg.value" />
+                    </td>
+                  </tr>
+                </tbody>
+              </v-table>
+              <p v-else class="text-body-2 text-medium-emphasis">No decoded arguments.</p>
             </v-card-text>
           </v-card>
         </v-col>
@@ -201,53 +248,11 @@ async function openUriOverlay(rawUri: string): Promise<void> {
         </v-card>
       </v-dialog>
 
-      <v-card border class="mt-3">
-        <v-card-title>Event Timeline</v-card-title>
-        <v-data-table
-          :headers="[
-            { title: 'Log Index', key: 'logIndex' },
-            { title: 'Event', key: 'eventName' },
-            { title: 'Signature', key: 'eventSignature' },
-            { title: 'Topic0', key: 'topic0' },
-            { title: 'Timestamp', key: 'timestamp' },
-            { title: 'Tx', key: 'txHash' },
-          ]"
-          :items="state.data.value?.eventFacts ?? []"
-        >
-          <template #item.eventSignature="{ item }">
-            <span class="cell-nowrap" :title="item.eventSignature">{{ formatMiddleTruncate(item.eventSignature, 32) }} <CopyButton :value="item.eventSignature" /></span>
-          </template>
-          <template #item.topic0="{ item }">
-            <span class="cell-nowrap" :title="item.topic0">{{ formatMiddleTruncate(item.topic0, 24) }} <CopyButton :value="item.topic0" /></span>
-          </template>
-          <template #item.timestamp="{ item }">{{ formatTimestamp(item.timestamp) }}</template>
-          <template #item.txHash="{ item }">
-            <span class="cell-nowrap">{{ formatTxHash(item.txHash) }} <CopyButton :value="item.txHash" /></span>
-          </template>
-          <template #expanded-row="{ columns, item }">
-            <tr>
-              <td :colspan="columns.length">
-                <pre>{{ JSON.stringify(item.eventArgs, null, 2) }}</pre>
-              </td>
-            </tr>
-          </template>
-        </v-data-table>
-      </v-card>
     </AsyncStateGate>
   </section>
 </template>
 
 <style scoped>
-pre {
-  margin: 0;
-  background: var(--color-surface-alt);
-  border: 1px solid var(--color-border);
-  border-radius: 8px;
-  padding: 0.75rem;
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-
 .uri-cell {
   cursor: pointer;
   font-family: "JetBrains Mono", "Fira Code", monospace;
@@ -276,12 +281,6 @@ pre {
 .uri-raw-truncated {
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.cell-nowrap {
-  display: inline-flex;
-  align-items: center;
   white-space: nowrap;
 }
 

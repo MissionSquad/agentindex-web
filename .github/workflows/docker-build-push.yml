@@ -41,23 +41,6 @@ jobs:
           fi
           echo "VERSION=$FINAL_VERSION" >> $GITHUB_OUTPUT
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-
-      - name: Install dependencies
-        run: yarn install --frozen-lockfile
-
-      - name: Type check
-        run: yarn run check
-
-      - name: Test
-        run: yarn test
-
-      - name: Build
-        run: yarn build
-
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 

@@ -105,11 +105,12 @@ function toGraphNode(node: NetworkNodeInput, nodeId: string): GraphNode {
   const parsedAddress = parseAddressNodeId(nodeId);
 
   if (inferredKind === "agent") {
+    const agentId = node.agentId ?? parsedAgent?.agentId;
     return {
       kind: "agent",
-      name: node.name ?? node.agentId ?? nodeId,
+      name: node.name ?? (agentId ? `Agent ${agentId}` : nodeId),
       chainId: node.chainId ?? parsedAgent?.chainId,
-      agentId: node.agentId ?? parsedAgent?.agentId,
+      agentId,
       meta: node.meta,
     };
   }
@@ -150,9 +151,12 @@ function ensureNodeExists(nodes: Record<string, GraphNode>, nodeId: string): voi
   const kind = inferNodeKindFromId(nodeId);
   const parsedAgent = parseAgentNodeId(nodeId);
   const parsedAddress = parseAddressNodeId(nodeId);
+  const name = kind === "agent" && parsedAgent?.agentId
+    ? `Agent ${parsedAgent.agentId}`
+    : nodeId;
   nodes[nodeId] = {
     kind,
-    name: nodeId,
+    name,
     chainId: parsedAgent?.chainId,
     agentId: parsedAgent?.agentId,
     address: parsedAddress ?? undefined,

@@ -8,7 +8,7 @@ import { formatComputedNumber, formatComputedPercent, formatNumber } from "../..
 import { resolveChartState } from "../../lib/chart-state";
 import type { ChartStateContext } from "../../lib/chart-state";
 import { useAsyncView } from "../../lib/view-state";
-import type { AnalyticsOverviewResponse } from "../../types/api";
+import type { AnalyticsOverviewResponse, WindowedValue } from "../../types/api";
 
 const api = ScannerApiClient.fromEnv();
 
@@ -61,19 +61,34 @@ const revocationVolumeState = computed(() =>
   resolveChartState("revocationVolume", state.data.value?.charts.revocationVolume ?? [], chartCtx.value),
 );
 
-const heuristicRows = computed(() => {
-  const data = state.data.value;
-  if (!data) {
-    return [];
-  }
+function formatWindowedNumber(value: WindowedValue): string {
+  return `${formatComputedNumber(value.d24h)} / ${formatComputedNumber(value.d7d)} / ${formatComputedNumber(value.d30d)}`;
+}
+
+function formatWindowedPercent(value: WindowedValue): string {
+  return `${formatComputedPercent(value.d24h)} / ${formatComputedPercent(value.d7d)} / ${formatComputedPercent(value.d30d)}`;
+}
+
+const windowedHeuristicRows = computed(() => {
+  const w = state.data.value?.windowedHeuristics;
+  if (!w) return [];
 
   return [
-    { label: "Growth Velocity", value: formatComputedNumber(data.heuristics.ecosystemGrowthVelocity) },
-    { label: "Feedback Density", value: formatComputedNumber(data.heuristics.feedbackDensity) },
-    { label: "Dormant Agent Ratio", value: formatComputedPercent(data.heuristics.dormantAgentRatio) },
-    { label: "Response Engagement", value: formatComputedPercent(data.heuristics.responseEngagementRate) },
-    { label: "Transfer Rate", value: formatComputedPercent(data.heuristics.transferRate) },
+    { label: "Ecosystem Growth Velocity", value: formatWindowedNumber(w.ecosystemGrowthVelocity) },
+    { label: "Feedback Density", value: formatWindowedNumber(w.feedbackDensity) },
+    { label: "Dormant Agent Ratio", value: formatWindowedPercent(w.dormantAgentRatio) },
+    { label: "Response Engagement Rate", value: formatWindowedPercent(w.responseEngagementRate) },
+    { label: "Transfer Rate", value: formatWindowedPercent(w.transferRate) },
+  ];
+});
+
+const pointHeuristicRows = computed(() => {
+  const data = state.data.value;
+  if (!data) return [];
+
+  return [
     { label: "Network Gini", value: formatComputedNumber(data.heuristics.networkGiniCoefficient) },
+    { label: "Responder Concentration", value: formatComputedNumber(data.heuristics.responderConcentration) },
   ];
 });
 </script>
@@ -87,18 +102,20 @@ const heuristicRows = computed(() => {
       empty-description="Analytics series are not available yet."
       @retry="state.refresh"
     >
-      <!-- Heuristics: compact horizontal row -->
       <v-card border class="mb-3">
-        <v-card-title class="text-subtitle-1 pb-0">Global Heuristics</v-card-title>
+        <v-card-title>
+          Heuristics
+          <span class="heuristic-hint">24h / 7d / 30d</span>
+        </v-card-title>
         <v-card-text>
-          <v-row dense>
-            <v-col cols="6" md="2" v-for="row in heuristicRows" :key="row.label">
-              <div class="heuristic-cell">
-                <span class="heuristic-label">{{ row.label }}</span>
-                <strong class="heuristic-value">{{ row.value }}</strong>
-              </div>
-            </v-col>
-          </v-row>
+          <div v-for="row in windowedHeuristicRows" :key="row.label" class="heuristic-row">
+            <span>{{ row.label }}</span>
+            <strong>{{ row.value }}</strong>
+          </div>
+          <div v-for="row in pointHeuristicRows" :key="row.label" class="heuristic-row">
+            <span>{{ row.label }}</span>
+            <strong>{{ row.value }}</strong>
+          </div>
         </v-card-text>
       </v-card>
 
@@ -229,23 +246,19 @@ const heuristicRows = computed(() => {
 </template>
 
 <style scoped>
-.heuristic-cell {
+.heuristic-row {
   display: flex;
-  flex-direction: column;
-  gap: 0.15rem;
-  padding: 0.25rem 0;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.5rem 0;
+  border-bottom: 1px solid var(--color-border-subtle);
+  gap: 1rem;
 }
 
-.heuristic-label {
-  font-size: 0.72rem;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--color-text-label);
-}
-
-.heuristic-value {
-  font-size: 1rem;
-  font-weight: 700;
-  color: var(--color-text-primary);
+.heuristic-hint {
+  font-size: 0.75rem;
+  font-weight: 400;
+  color: var(--color-text-muted);
+  margin-left: 0.5rem;
 }
 </style>

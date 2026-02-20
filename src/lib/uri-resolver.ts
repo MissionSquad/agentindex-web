@@ -54,6 +54,17 @@ export function resolveAgentUri(uri: string | null | undefined): ResolvedUri {
     return { scheme: "http", raw: trimmed, decoded: null, error: null };
   }
 
+  // --- Raw JSON ---
+  if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+    try {
+      const parsed: unknown = JSON.parse(trimmed);
+      return { scheme: "data-json", raw: trimmed, decoded: parsed, error: null };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Unknown parse error";
+      return { scheme: "data-json", raw: trimmed, decoded: null, error: `Failed to parse JSON: ${message}` };
+    }
+  }
+
   // --- Data URIs ---
   const dataMatch = trimmed.match(DATA_URI_RE);
   if (dataMatch) {

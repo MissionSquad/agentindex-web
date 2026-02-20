@@ -5,13 +5,20 @@ import CopyButton from "../shared/CopyButton.vue";
 import MetricTile from "../shared/MetricTile.vue";
 import LineSeriesChart from "../shared/LineSeriesChart.vue";
 import { ScannerApiClient } from "../../lib/api-client";
-import { formatComputedNumber, formatComputedPercent, formatNumber, formatPercent, formatTimestamp, formatTxHash } from "../../lib/formatters";
+import { formatNumber, formatPercent, formatTimestamp } from "../../lib/formatters";
 import { resolveChartState } from "../../lib/chart-state";
 import type { ChartStateContext } from "../../lib/chart-state";
 import { useAsyncView } from "../../lib/view-state";
 import { resolveAgentUri, needsAsyncDataResolve, resolveDataUriAsync } from "../../lib/uri-resolver";
 import { extractAgentUriMetadata } from "../../lib/uri-metadata";
-import type { AnalyticsOverviewResponse, TopAgentSummary, WindowedValue } from "../../types/api";
+import type { AnalyticsOverviewResponse, TimeSeriesPoint, TopAgentSummary } from "../../types/api";
+
+const THREE_DAYS_MS = 3 * 24 * 60 * 60 * 1000;
+
+function lastThreeDays(points: TimeSeriesPoint[]): TimeSeriesPoint[] {
+  const cutoff = Date.now() - THREE_DAYS_MS;
+  return points.filter((p) => p.timestamp >= cutoff);
+}
 
 const api = ScannerApiClient.fromEnv();
 
@@ -80,30 +87,15 @@ const metricTiles = computed(() => {
   ];
 });
 
-function formatWindowedNumber(value: WindowedValue): string {
-  return `${formatComputedNumber(value.d24h)} / ${formatComputedNumber(value.d7d)} / ${formatComputedNumber(value.d30d)}`;
-}
-
-function formatWindowedPercent(value: WindowedValue): string {
-  return `${formatComputedPercent(value.d24h)} / ${formatComputedPercent(value.d7d)} / ${formatComputedPercent(value.d30d)}`;
-}
-
-const heuristicRows = computed(() => {
-  const w = state.data.value?.windowedHeuristics;
-  if (!w) {
-    return [];
-  }
-
-  return [
-    { label: "Ecosystem Growth Velocity", value: formatWindowedNumber(w.ecosystemGrowthVelocity) },
-    { label: "Feedback Density", value: formatWindowedNumber(w.feedbackDensity) },
-    { label: "Dormant Agent Ratio", value: formatWindowedPercent(w.dormantAgentRatio) },
-    { label: "Response Engagement Rate", value: formatWindowedPercent(w.responseEngagementRate) },
-    { label: "Transfer Rate", value: formatWindowedPercent(w.transferRate) },
-  ];
-});
-
 const topAgents = computed(() => state.data.value?.charts.topAgentsByFeedback ?? []);
+
+const topAgentsByReputation = computed(() => {
+  const agents = state.data.value?.charts.topAgentsByFeedback ?? [];
+  return [...agents]
+    .filter((a) => a.reputationScore !== null)
+    .sort((a, b) => (b.reputationScore ?? 0) - (a.reputationScore ?? 0))
+    .slice(0, 10);
+});
 const activityFeed = computed(() => state.data.value?.activityFeed ?? []);
 
 // Resolve agent URIs for top agents to extract name + image
@@ -177,6 +169,31 @@ const topAgentHeaders = [
   { title: "Client Diversity", key: "clientDiversity", width: "120px" },
   { title: "Feedback", key: "value", width: "90px" },
 ];
+
+interface SummarySegment {
+  type: "text" | "address";
+  value: string;
+}
+
+function parseSummary(text: string): SummarySegment[] {
+  const segments: SummarySegment[] = [];
+  let lastIndex = 0;
+
+  for (const match of text.matchAll(/0x[a-fA-F0-9]{40}/g)) {
+    const idx = match.index!;
+    if (idx > lastIndex) {
+      segments.push({ type: "text", value: text.slice(lastIndex, idx) });
+    }
+    segments.push({ type: "address", value: match[0] });
+    lastIndex = idx + match[0].length;
+  }
+
+  if (lastIndex < text.length) {
+    segments.push({ type: "text", value: text.slice(lastIndex) });
+  }
+
+  return segments;
+}
 </script>
 
 <template>
@@ -201,36 +218,9 @@ const topAgentHeaders = [
       </v-row>
 
       <v-row class="mt-2" dense>
-        <v-col cols="12" md="4">
-          <LineSeriesChart
-            title="Agent Registrations"
-            :points="state.data.value?.charts.registrations ?? []"
-            :state="registrationsState.state"
-            color="#0b5e67"
-          />
-        </v-col>
-        <v-col cols="12" md="4">
-          <LineSeriesChart
-            title="Feedback Submissions"
-            :points="state.data.value?.charts.feedbackVolume ?? []"
-            :state="feedbackVolumeState.state"
-            color="#ff7a45"
-          />
-        </v-col>
-        <v-col cols="12" md="4">
-          <LineSeriesChart
-            title="Ownership Transfers"
-            :points="state.data.value?.charts.transferVolume ?? []"
-            :state="transferVolumeState.state"
-            color="#1d4ed8"
-          />
-        </v-col>
-      </v-row>
-
-      <v-row class="mt-2" dense>
-        <v-col cols="12" md="7">
+        <v-col cols="12" md="6">
           <v-card border>
-            <v-card-title>Top 10 Agents By Feedback</v-card-title>
+            <v-card-title>Top Agents By Feedback</v-card-title>
             <v-data-table
               :headers="topAgentHeaders"
               :items="topAgents.slice(0, 10)"
@@ -260,18 +250,35 @@ const topAgentHeaders = [
           </v-card>
         </v-col>
 
-        <v-col cols="12" md="5">
+        <v-col cols="12" md="6">
           <v-card border>
-            <v-card-title>
-              Heuristics
-              <span class="heuristic-hint">24h / 7d / 30d</span>
-            </v-card-title>
-            <v-card-text>
-              <div v-for="row in heuristicRows" :key="row.label" class="heuristic-row">
-                <span>{{ row.label }}</span>
-                <strong>{{ row.value }}</strong>
-              </div>
-            </v-card-text>
+            <v-card-title>Top Agents By Reputation</v-card-title>
+            <v-data-table
+              :headers="topAgentHeaders"
+              :items="topAgentsByReputation"
+              :items-per-page="-1"
+              density="comfortable"
+              hide-default-footer
+            >
+              <template #item.image="{ item }">
+                <v-avatar size="28" class="my-1">
+                  <v-img v-if="agentImage(item)" :src="agentImage(item)!" />
+                  <v-icon v-else size="20">mdi-robot</v-icon>
+                </v-avatar>
+              </template>
+              <template #item.name="{ item }">
+                <a :href="`/agents/${item.agentId}`" class="agent-link">{{ agentName(item) }}</a>
+              </template>
+              <template #item.reputationScore="{ item }">
+                <template v-if="item.reputationScore !== null">{{ formatNumber(item.reputationScore) }}</template>
+                <span v-else class="text-medium-emphasis">-</span>
+              </template>
+              <template #item.clientDiversity="{ item }">
+                <template v-if="item.clientDiversity !== null">{{ formatPercent(item.clientDiversity) }}</template>
+                <span v-else class="text-medium-emphasis">-</span>
+              </template>
+              <template #item.value="{ item }">{{ formatNumber(item.value) }}</template>
+            </v-data-table>
           </v-card>
         </v-col>
       </v-row>
@@ -280,12 +287,20 @@ const topAgentHeaders = [
         <v-col cols="12">
           <v-card border>
             <v-card-title>Live Activity Feed</v-card-title>
-            <v-card-text class="activity-wrap">
+            <v-card-text>
               <v-list density="compact">
-                <v-list-item v-for="item in activityFeed.slice(0, 12)" :key="`${item.txHash}:${item.timestamp}`">
+                <v-list-item v-for="item in activityFeed" :key="`${item.txHash}:${item.timestamp}`">
                   <template #title>{{ item.eventName }}</template>
                   <template #subtitle>
-                    {{ item.summary }} · {{ formatTimestamp(item.timestamp) }} · <a :href="`/tx/${item.txHash}`">{{ formatTxHash(item.txHash) }}</a> <CopyButton :value="item.txHash" />
+                    <span>
+                      <template v-for="(seg, i) in parseSummary(item.summary)" :key="i">
+                        <a v-if="seg.type === 'address'" :href="`/address/${seg.value.toLowerCase()}`">{{ seg.value }}</a>
+                        <span v-else>{{ seg.value }}</span>
+                      </template>
+                      · {{ formatTimestamp(item.timestamp) }} ·
+                      <a :href="`/tx/${item.txHash}`">{{ item.txHash }}</a>
+                      <CopyButton :value="item.txHash" />
+                    </span>
                   </template>
                 </v-list-item>
               </v-list>
@@ -293,32 +308,38 @@ const topAgentHeaders = [
           </v-card>
         </v-col>
       </v-row>
+
+      <v-row class="mt-2" dense>
+        <v-col cols="12" md="4">
+          <LineSeriesChart
+            title="Agent Registrations"
+            :points="lastThreeDays(state.data.value?.charts.registrations ?? [])"
+            :state="registrationsState.state"
+            color="#0b5e67"
+          />
+        </v-col>
+        <v-col cols="12" md="4">
+          <LineSeriesChart
+            title="Feedback Submissions"
+            :points="lastThreeDays(state.data.value?.charts.feedbackVolume ?? [])"
+            :state="feedbackVolumeState.state"
+            color="#ff7a45"
+          />
+        </v-col>
+        <v-col cols="12" md="4">
+          <LineSeriesChart
+            title="Ownership Transfers"
+            :points="lastThreeDays(state.data.value?.charts.transferVolume ?? [])"
+            :state="transferVolumeState.state"
+            color="#1d4ed8"
+          />
+        </v-col>
+      </v-row>
     </AsyncStateGate>
   </section>
 </template>
 
 <style scoped>
-.heuristic-row {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 0.5rem 0;
-  border-bottom: 1px solid var(--color-border-subtle);
-  gap: 1rem;
-}
-
-.heuristic-hint {
-  font-size: 0.75rem;
-  font-weight: 400;
-  color: var(--color-text-muted);
-  margin-left: 0.5rem;
-}
-
-.activity-wrap {
-  max-height: 420px;
-  overflow-y: auto;
-}
-
 .agent-link {
   color: var(--color-link);
   text-decoration: none;

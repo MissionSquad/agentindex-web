@@ -7,10 +7,13 @@ import UriOverlay from "../shared/UriOverlay.vue";
 import { ScannerApiClient } from "../../lib/api-client";
 import { formatAddress, formatNumber, formatPercent, formatTimestamp, formatTxHash } from "../../lib/formatters";
 import { useAsyncView } from "../../lib/view-state";
-import type { ReputationResponse } from "../../types/api";
+import { resolveAgentUri, needsAsyncDataResolve, resolveDataUriAsync } from "../../lib/uri-resolver";
+import { extractAgentUriMetadata } from "../../lib/uri-metadata";
+import type { ReputationResponse, ResponseEntry } from "../../types/api";
 
 const api = ScannerApiClient.fromEnv();
 const uriOverlay = ref<InstanceType<typeof UriOverlay> | null>(null);
+const FETCHABLE_SCHEMES = new Set<string>(["http", "ipfs"]);
 
 const filters = reactive({
   page: 1,
@@ -51,6 +54,74 @@ onMounted(() => {
   void state.refresh();
 });
 
+// Resolve agent URIs to get JSON-derived names for the Agent column
+const agentNameMap = ref(new Map<string, string>());
+
+async function resolveAgentName(agentId: string): Promise<string | null> {
+  try {
+    const profile = await api.getAgent(agentId);
+    const agentUri = profile.currentUri || profile.agent.agentUri;
+    if (!agentUri) return null;
+
+    let resolved = resolveAgentUri(agentUri);
+
+    if (needsAsyncDataResolve(resolved)) {
+      try {
+        resolved = await resolveDataUriAsync(agentUri);
+      } catch {
+        return null;
+      }
+    }
+
+    if (FETCHABLE_SCHEMES.has(resolved.scheme) && resolved.decoded === null && !resolved.error) {
+      try {
+        const fetched = await api.resolveUri(resolved.raw);
+        if (fetched.contentType === "application/json" && fetched.body !== null) {
+          resolved = { scheme: resolved.scheme, raw: resolved.raw, decoded: fetched.body, error: null };
+        }
+      } catch {
+        return null;
+      }
+    }
+
+    const metadata = extractAgentUriMetadata(resolved.decoded);
+    return metadata.name;
+  } catch {
+    return null;
+  }
+}
+
+watch(
+  () => state.data.value,
+  async (data) => {
+    if (!data) return;
+
+    const agentIds = new Set<string>();
+    data.recentResponses.items.forEach((item) => agentIds.add(item.agentId));
+    data.recentFeedback.items.forEach((item) => agentIds.add(item.agentId));
+
+    if (agentIds.size === 0) return;
+
+    const map = new Map<string, string>();
+
+    await Promise.all(
+      Array.from(agentIds).map(async (agentId) => {
+        const name = await resolveAgentName(agentId);
+        if (name) {
+          map.set(agentId, name);
+        }
+      }),
+    );
+
+    agentNameMap.value = map;
+  },
+  { immediate: true },
+);
+
+function displayAgentName(agentId: string): string {
+  return agentNameMap.value.get(agentId) ?? agentId;
+}
+
 const feedbackHeaders = [
   { title: "Timestamp", key: "timestamp" },
   { title: "Agent", key: "agentId" },
@@ -67,11 +138,77 @@ const responseHeaders = [
   { title: "Timestamp", key: "timestamp" },
   { title: "Agent", key: "agentId" },
   { title: "Client", key: "clientAddress" },
-  { title: "Feedback Index", key: "feedbackIndex" },
   { title: "Responder", key: "responder" },
-  { title: "Response URI", key: "responseUri" },
+  { title: "Response", key: "responseUri" },
   { title: "Tx", key: "txHash" },
 ];
+
+// Resolve response URIs to extract the "response" field value
+const responseValueMap = ref(new Map<string, string>());
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function extractResponseField(decoded: unknown): string | null {
+  if (!isRecord(decoded)) return null;
+  const response = decoded.response;
+  return typeof response === "string" && response.length > 0 ? response : null;
+}
+
+watch(
+  () => state.data.value?.recentResponses.items,
+  async (responses) => {
+    if (!responses || responses.length === 0) return;
+
+    const map = new Map<string, string>();
+
+    await Promise.all(
+      responses.map(async (entry) => {
+        if (!entry.responseUri) return;
+
+        const key = `${entry.responseId}`;
+        let resolved = resolveAgentUri(entry.responseUri);
+
+        if (needsAsyncDataResolve(resolved)) {
+          try {
+            resolved = await resolveDataUriAsync(entry.responseUri);
+          } catch {
+            return;
+          }
+        }
+
+        if (FETCHABLE_SCHEMES.has(resolved.scheme) && resolved.decoded === null && !resolved.error) {
+          try {
+            const fetched = await api.resolveUri(resolved.raw);
+            if (fetched.contentType === "application/json" && fetched.body !== null) {
+              resolved = { scheme: resolved.scheme, raw: resolved.raw, decoded: fetched.body, error: null };
+            }
+          } catch {
+            return;
+          }
+        }
+
+        const responseText = extractResponseField(resolved.decoded);
+        if (responseText) {
+          map.set(key, responseText);
+        }
+      }),
+    );
+
+    responseValueMap.value = map;
+  },
+  { immediate: true },
+);
+
+function resolvedResponseText(entry: ResponseEntry): string | null {
+  return responseValueMap.value.get(`${entry.responseId}`) ?? null;
+}
+
+function truncateText(text: string, maxLength: number): string {
+  if (text.length <= maxLength) return text;
+  return `${text.slice(0, maxLength)}...`;
+}
 </script>
 
 <template>
@@ -140,6 +277,46 @@ const responseHeaders = [
       </v-row>
 
       <v-card border class="mb-3">
+        <v-card-title>Recent Responses</v-card-title>
+        <v-data-table
+          :headers="responseHeaders"
+          :items="state.data.value?.recentResponses.items ?? []"
+          :items-per-page="-1"
+          density="comfortable"
+          hide-default-footer
+        >
+          <template #item.timestamp="{ item }">{{ formatTimestamp(item.timestamp) }}</template>
+          <template #item.agentId="{ item }"><a :href="`/agents/${item.agentId}`">{{ displayAgentName(item.agentId) }}</a></template>
+          <template #item.clientAddress="{ item }">
+            <a :href="`/address/${item.clientAddress}`">{{ formatAddress(item.clientAddress) }}</a>
+            <CopyButton :value="item.clientAddress" />
+          </template>
+          <template #item.responder="{ item }">
+            <a :href="`/address/${item.responder}`">{{ formatAddress(item.responder) }}</a>
+            <CopyButton :value="item.responder" />
+          </template>
+          <template #item.responseUri="{ item }">
+            <template v-if="item.responseUri">
+              <span class="response-text">{{ resolvedResponseText(item) ? truncateText(resolvedResponseText(item)!, 20) : "..." }}</span>
+              <v-btn
+                icon="mdi-dock-window"
+                variant="text"
+                size="x-small"
+                density="compact"
+                class="overlay-btn"
+                @click="uriOverlay?.open(item.responseUri)"
+              />
+            </template>
+            <span v-else>-</span>
+          </template>
+          <template #item.txHash="{ item }">
+            <a :href="`/tx/${item.txHash}`">{{ formatTxHash(item.txHash) }}</a>
+            <CopyButton :value="item.txHash" />
+          </template>
+        </v-data-table>
+      </v-card>
+
+      <v-card border>
         <v-card-title>Recent Feedback</v-card-title>
         <v-data-table
           :headers="feedbackHeaders"
@@ -149,14 +326,17 @@ const responseHeaders = [
           hide-default-footer
         >
           <template #item.timestamp="{ item }">{{ formatTimestamp(item.timestamp) }}</template>
-          <template #item.agentId="{ item }"><a :href="`/agents/${item.agentId}`">{{ item.agentId }}</a></template>
+          <template #item.agentId="{ item }"><a :href="`/agents/${item.agentId}`">{{ displayAgentName(item.agentId) }}</a></template>
           <template #item.clientAddress="{ item }">
             <a :href="`/address/${item.clientAddress}`">{{ formatAddress(item.clientAddress) }}</a>
             <CopyButton :value="item.clientAddress" />
           </template>
           <template #item.normalizedValue="{ item }">{{ formatNumber(item.normalizedValue) }}</template>
           <template #item.revoked="{ item }">{{ item.revoked ? "Yes" : "No" }}</template>
-          <template #item.txHash="{ item }">{{ formatTxHash(item.txHash) }} <CopyButton :value="item.txHash" /></template>
+          <template #item.txHash="{ item }">
+            <a :href="`/tx/${item.txHash}`">{{ formatTxHash(item.txHash) }}</a>
+            <CopyButton :value="item.txHash" />
+          </template>
         </v-data-table>
 
         <v-divider />
@@ -182,36 +362,6 @@ const responseHeaders = [
           </div>
         </v-card-actions>
       </v-card>
-
-      <v-card border>
-        <v-card-title>Recent Responses</v-card-title>
-        <v-data-table
-          :headers="responseHeaders"
-          :items="state.data.value?.recentResponses.items ?? []"
-          :items-per-page="-1"
-          density="comfortable"
-          hide-default-footer
-        >
-          <template #item.timestamp="{ item }">{{ formatTimestamp(item.timestamp) }}</template>
-          <template #item.agentId="{ item }"><a :href="`/agents/${item.agentId}`">{{ item.agentId }}</a></template>
-          <template #item.clientAddress="{ item }">
-            <a :href="`/address/${item.clientAddress}`">{{ formatAddress(item.clientAddress) }}</a>
-            <CopyButton :value="item.clientAddress" />
-          </template>
-          <template #item.responder="{ item }">
-            <a :href="`/address/${item.responder}`">{{ formatAddress(item.responder) }}</a>
-            <CopyButton :value="item.responder" />
-          </template>
-          <template #item.responseUri="{ item }">
-            <template v-if="item.responseUri">
-              <span class="uri-cell" @click="uriOverlay?.open(item.responseUri)">open</span>
-              <CopyButton :value="item.responseUri" />
-            </template>
-            <span v-else>-</span>
-          </template>
-          <template #item.txHash="{ item }">{{ formatTxHash(item.txHash) }} <CopyButton :value="item.txHash" /></template>
-        </v-data-table>
-      </v-card>
     </AsyncStateGate>
 
     <UriOverlay ref="uriOverlay" />
@@ -219,14 +369,23 @@ const responseHeaders = [
 </template>
 
 <style scoped>
-.uri-cell {
-  cursor: pointer;
+.response-text {
   font-family: "JetBrains Mono", "Fira Code", monospace;
   font-size: 0.82rem;
-  color: var(--color-link-alt);
+  color: var(--color-text-secondary);
 }
 
-.uri-cell:hover {
-  text-decoration: underline;
+.overlay-btn {
+  opacity: 0.45;
+  transition: opacity 0.15s ease;
+  margin-left: 4px;
+  vertical-align: middle;
+  position: relative;
+  top: -2px;
+  flex-shrink: 0;
+}
+
+.overlay-btn:hover {
+  opacity: 1;
 }
 </style>

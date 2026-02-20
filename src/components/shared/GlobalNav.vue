@@ -2,6 +2,8 @@
 import { onMounted, ref } from "vue";
 import { useTheme } from "vuetify";
 import { getEffectiveTheme, getStoredTheme, applyTheme, type ThemeMode } from "../../lib/theme";
+import { ScannerApiClient } from "../../lib/api-client";
+import { classifySearchInput } from "../../lib/query";
 
 interface NavItem {
   label: string;
@@ -15,9 +17,12 @@ const navItems: NavItem[] = [
   { label: "Reputation", href: "/reputation", icon: "mdi-star-outline" },
   { label: "Analytics", href: "/analytics", icon: "mdi-chart-box-outline" },
   { label: "Network", href: "/network", icon: "mdi-graph-outline" },
-  { label: "Search", href: "/search", icon: "mdi-magnify" },
 ];
 
+const api = ScannerApiClient.fromEnv();
+const searchInput = ref("");
+const searching = ref(false);
+const searchFocused = ref(false);
 const menuOpen = ref(false);
 const currentTheme = ref<ThemeMode>("light");
 const vuetifyTheme = useTheme();
@@ -30,6 +35,44 @@ function toggleTheme(): void {
   currentTheme.value = currentTheme.value === "dark" ? "light" : "dark";
   applyTheme(currentTheme.value);
   syncVuetify();
+}
+
+async function handleSearch(): Promise<void> {
+  const trimmed = searchInput.value.trim();
+  if (!trimmed) return;
+
+  const type = classifySearchInput(trimmed);
+
+  if (type === "agent") {
+    window.location.href = `/agents/${trimmed}`;
+    return;
+  }
+  if (type === "address") {
+    window.location.href = `/address/${trimmed.toLowerCase()}`;
+    return;
+  }
+  if (type === "transaction") {
+    window.location.href = `/tx/${trimmed.toLowerCase()}`;
+    return;
+  }
+
+  searching.value = true;
+
+  try {
+    const response = await api.search({ q: trimmed, limit: 2 });
+    const items = response.results.items;
+
+    if (items.length === 1) {
+      window.location.href = items[0].route;
+      return;
+    }
+
+    window.location.href = `/search?q=${encodeURIComponent(trimmed)}`;
+  } catch {
+    window.location.href = `/search?q=${encodeURIComponent(trimmed)}`;
+  } finally {
+    searching.value = false;
+  }
 }
 
 onMounted(() => {
@@ -58,9 +101,26 @@ onMounted(() => {
         aria-label="Open navigation"
         @click="menuOpen = !menuOpen"
       />
-      <a href="/" class="brand">AgentIndex</a>
+      <a href="/" class="brand">
+        <span class="brand-name">Agent Index</span>
+        <span class="brand-tagline">ERC-8004 Reputation Tracker</span>
+      </a>
 
       <div class="nav-links d-none d-md-flex">
+        <v-text-field
+          v-model="searchInput"
+          :class="['nav-search', { 'nav-search--expanded': searchFocused }]"
+          placeholder="Search..."
+          prepend-inner-icon="mdi-magnify"
+          variant="outlined"
+          density="compact"
+          hide-details
+          single-line
+          :loading="searching"
+          @keyup.enter="handleSearch"
+          @focus="searchFocused = true"
+          @blur="searchFocused = false"
+        />
         <a v-for="item in navItems" :key="item.href" :href="item.href" class="nav-link">
           <v-icon :icon="item.icon" size="16" />
           <span>{{ item.label }}</span>
@@ -98,6 +158,7 @@ onMounted(() => {
             :title="item.label"
             :prepend-icon="item.icon"
           />
+          <v-list-item href="/search" title="Search" prepend-icon="mdi-magnify" />
         </v-list>
       </v-menu>
     </v-toolbar>
@@ -112,10 +173,25 @@ onMounted(() => {
 }
 
 .brand {
-  color: var(--color-text-primary);
+  display: flex;
+  flex-direction: column;
   text-decoration: none;
+  margin-left: 0.75rem;
+  line-height: 1.15;
+}
+
+.brand-name {
+  color: var(--color-text-primary);
   font-weight: 700;
+  font-size: 1.1rem;
   letter-spacing: 0.04em;
+}
+
+.brand-tagline {
+  color: var(--color-text-muted);
+  font-size: 0.68rem;
+  font-weight: 400;
+  letter-spacing: 0.03em;
 }
 
 .nav-links {
@@ -136,5 +212,15 @@ onMounted(() => {
 
 .nav-link:hover {
   background: var(--color-surface-hover);
+}
+
+.nav-search {
+  flex: 0 0 auto;
+  width: 260px;
+  transition: width 250ms ease;
+}
+
+.nav-search--expanded {
+  width: 480px;
 }
 </style>
