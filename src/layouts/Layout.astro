@@ -126,6 +126,31 @@ const { title, description = "AgentIndex – Trustless Agent discovery and analy
     .content-shell {
       padding: 0.75rem;
     }
+
+    /* Horizontal scroll for data tables on mobile */
+    .v-table__wrapper {
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+    }
+  }
+
+  @media (max-width: 599px) {
+    .content-shell {
+      overflow-x: hidden;
+    }
+
+    /* Stack pagination footers vertically */
+    .v-card-actions.justify-space-between {
+      flex-direction: column;
+      gap: 0.5rem;
+      align-items: stretch !important;
+    }
+
+    /* Prevent card titles from overflowing */
+    .v-card-title {
+      font-size: 1rem !important;
+      word-break: break-word;
+    }
   }
 
   /* vue-json-pretty dark overrides */

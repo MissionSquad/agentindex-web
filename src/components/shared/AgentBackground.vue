@@ -99,9 +99,18 @@ class Particle {
   }
 }
 
+function effectiveParticleCount(): number {
+  return width < 768 ? Math.min(props.particleCount, 40) : props.particleCount;
+}
+
+function effectiveConnectionDistance(): number {
+  return width < 768 ? Math.min(props.connectionDistance, 90) : props.connectionDistance;
+}
+
 function initParticles(): void {
   particles = [];
-  for (let i = 0; i < props.particleCount; i++) {
+  const count = effectiveParticleCount();
+  for (let i = 0; i < count; i++) {
     particles.push(new Particle());
   }
 }
@@ -137,7 +146,7 @@ function animate(): void {
       const dy = particles[i].y - particles[j].y;
       const distance = Math.sqrt(dx * dx + dy * dy);
 
-      if (distance < props.connectionDistance) {
+      if (distance < effectiveConnectionDistance()) {
         ctx.beginPath();
         const opacity = 1 - distance / props.connectionDistance;
         ctx.strokeStyle = `rgba(100, 116, 139, ${opacity * props.lineOpacity})`;

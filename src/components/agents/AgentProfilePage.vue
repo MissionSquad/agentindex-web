@@ -378,7 +378,7 @@ function parseSummary(text: string): SummarySegment[] {
         </v-card-text>
       </v-card>
 
-      <v-tabs v-model="currentTab" color="primary" class="mb-2">
+      <v-tabs v-model="currentTab" color="primary" class="mb-2" show-arrows>
         <v-tab value="tx">Transaction History</v-tab>
         <v-tab value="ownership">Ownership History</v-tab>
         <v-tab value="uri">URI History</v-tab>
@@ -792,5 +792,26 @@ function parseSummary(text: string): SummarySegment[] {
 
 .overlay-btn:hover {
   opacity: 1;
+}
+
+@media (max-width: 599px) {
+  .title-row {
+    flex-wrap: wrap;
+    gap: 0.4rem;
+  }
+
+  .title {
+    font-size: 1.2rem;
+  }
+
+  .agent-summary-grid,
+  .heuristics-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .header-identity {
+    flex-direction: column;
+    align-items: flex-start;
+  }
 }
 </style>

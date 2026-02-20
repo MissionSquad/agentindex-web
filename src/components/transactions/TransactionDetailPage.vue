@@ -292,4 +292,10 @@ async function openUriOverlay(rawUri: string): Promise<void> {
   max-height: 400px;
   overflow: auto;
 }
+
+@media (max-width: 959px) {
+  .v-table {
+    min-width: 480px;
+  }
+}
 </style>

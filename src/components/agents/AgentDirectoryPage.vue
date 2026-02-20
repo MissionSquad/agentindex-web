@@ -308,7 +308,7 @@ function resolvedAgentName(agent: AgentSummary): string {
               hide-details
               style="max-width: 100px"
             />
-            <v-pagination v-model="filters.page" :length="totalPages" total-visible="7" density="compact" />
+            <v-pagination v-model="filters.page" :length="totalPages" :total-visible="5" density="compact" />
           </div>
         </v-card-actions>
       </v-card>

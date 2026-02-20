@@ -5,7 +5,7 @@ import CopyButton from "../shared/CopyButton.vue";
 import MetricTile from "../shared/MetricTile.vue";
 import LineSeriesChart from "../shared/LineSeriesChart.vue";
 import { ScannerApiClient } from "../../lib/api-client";
-import { formatNumber, formatPercent, formatTimestamp } from "../../lib/formatters";
+import { formatNumber, formatPercent, formatTimestamp, formatTxHash } from "../../lib/formatters";
 import { resolveChartState } from "../../lib/chart-state";
 import type { ChartStateContext } from "../../lib/chart-state";
 import { useAsyncView } from "../../lib/view-state";
@@ -298,7 +298,7 @@ function parseSummary(text: string): SummarySegment[] {
                         <span v-else>{{ seg.value }}</span>
                       </template>
                       · {{ formatTimestamp(item.timestamp) }} ·
-                      <a :href="`/tx/${item.txHash}`">{{ item.txHash }}</a>
+                      <a :href="`/tx/${item.txHash}`">{{ formatTxHash(item.txHash) }}</a>
                       <CopyButton :value="item.txHash" />
                     </span>
                   </template>

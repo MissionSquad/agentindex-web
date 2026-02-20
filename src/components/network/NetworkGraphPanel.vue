@@ -730,6 +730,12 @@ const edgeHeaders = [
   overflow: hidden;
 }
 
+@media (max-width: 599px) {
+  .graph-wrap {
+    height: 320px;
+  }
+}
+
 .legend {
   display: flex;
   flex-wrap: wrap;
