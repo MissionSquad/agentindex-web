@@ -27,6 +27,7 @@ async function copy(): Promise<void> {
 
 <template>
   <v-btn
+    v-if="value"
     :icon="copied ? 'mdi-check' : 'mdi-content-copy'"
     variant="text"
     density="compact"
