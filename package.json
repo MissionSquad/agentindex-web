@@ -1,24 +1,45 @@
 {
-  "name": "astro-vue-template",
+  "name": "agentindex-web",
+  "version": "0.1.0",
+  "private": true,
   "type": "module",
-  "version": "1.0.0",
+  "packageManager": "yarn@1.22.22",
   "scripts": {
     "dev": "astro dev",
     "build": "astro build",
     "preview": "astro preview",
-    "astro": "astro"
+    "astro": "astro",
+    "check": "astro check",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "prepublishOnly": "yarn check && yarn test && yarn build"
   },
   "dependencies": {
+    "@astrojs/node": "^9.5.0",
     "@astrojs/sitemap": "^3.7.0",
     "@astrojs/vue": "^5.1.4",
     "@mdi/font": "^7.4.47",
     "astro": "^5.16.9",
-    "vite-plugin-vuetify": "^2.1.2",
+    "graphology": "^0.26.0",
+    "graphology-layout-forceatlas2": "^0.10.1",
+    "graphology-types": "^0.24.8",
+    "sigma": "^3.0.1",
     "vue": "^3.5.26",
+    "vue-json-pretty": "^2.6.0",
     "vuetify": "^3.11.6"
   },
   "devDependencies": {
     "@astrojs/check": "^0.9.6",
-    "typescript": "^5.9.3"
+    "@types/node": "^24.3.0",
+    "@vitejs/plugin-vue": "^6.0.1",
+    "@vitest/coverage-v8": "^2.1.9",
+    "@vue/test-utils": "^2.4.6",
+    "jsdom": "^26.1.0",
+    "typescript": "^5.9.3",
+    "vitest": "^2.1.9"
+  },
+  "engines": {
+    "node": ">=20"
   }
 }

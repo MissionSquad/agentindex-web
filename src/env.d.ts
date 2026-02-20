@@ -1,3 +1,9 @@
-/// <reference path="../.astro/types.d.ts" />
 /// <reference types="astro/client" />
-/// <reference types="@astrojs/vue/client" />
+
+interface ImportMetaEnv {
+  readonly PUBLIC_SCANNER_API_BASE_URL?: string;
+}
+
+interface ImportMeta {
+  readonly env: ImportMetaEnv;
+}

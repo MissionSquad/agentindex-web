@@ -1,0 +1,11 @@
+---
+import Layout from "../../layouts/Layout.astro";
+import TransactionDetailPage from "../../components/transactions/TransactionDetailPage.vue";
+
+const { txHash } = Astro.params;
+const resolvedTxHash = txHash ?? "";
+---
+
+<Layout title={`AgentIndex · Tx ${resolvedTxHash}`} description="Decoded transaction envelope, call, and event timeline.">
+  <TransactionDetailPage client:load txHash={resolvedTxHash} />
+</Layout>

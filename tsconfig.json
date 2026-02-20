@@ -1,5 +1,19 @@
 {
   "extends": "astro/tsconfigs/strict",
-  "include": [".astro/types.d.ts", "**/*"],
-  "exclude": ["dist"]
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "esModuleInterop": true,
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    "rootDir": ".",
+    "outDir": "./dist-types",
+    "types": ["vitest/globals", "node"]
+  },
+  "include": [".astro/types.d.ts", "src/**/*", "test/**/*", "vitest.config.ts"],
+  "exclude": ["dist", "node_modules"]
 }

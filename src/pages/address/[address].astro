@@ -1,0 +1,11 @@
+---
+import Layout from "../../layouts/Layout.astro";
+import AddressProfilePage from "../../components/address/AddressProfilePage.vue";
+
+const { address } = Astro.params;
+const resolvedAddress = address ?? "";
+---
+
+<Layout title={`AgentIndex · Address ${resolvedAddress}`} description="Wallet-centric activity profile.">
+  <AddressProfilePage client:load address={resolvedAddress} />
+</Layout>

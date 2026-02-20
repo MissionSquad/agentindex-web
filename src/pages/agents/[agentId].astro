@@ -1,0 +1,11 @@
+---
+import Layout from "../../layouts/Layout.astro";
+import AgentProfilePage from "../../components/agents/AgentProfilePage.vue";
+
+const { agentId } = Astro.params;
+const resolvedAgentId = agentId ?? "";
+---
+
+<Layout title={`AgentIndex · Agent ${resolvedAgentId}`} description="Deep profile view for a single agent.">
+  <AgentProfilePage client:load agentId={resolvedAgentId} />
+</Layout>

@@ -1,60 +1,146 @@
 ---
-import NavBar from '../components/NavBar.vue';
+import GlobalNav from "../components/shared/GlobalNav.vue";
 
 interface Props {
   title: string;
+  description?: string;
 }
 
-const { title } = Astro.props;
+const { title, description = "AgentIndex – Trustless Agent discovery and analytics" } = Astro.props;
 ---
 
 <!doctype html>
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="description" content="Astro Vue Vuetify Template" />
-    <meta name="viewport" content="width=device-width" />
+    <meta name="description" content={description} />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <title>{title}</title>
+    <script is:inline>
+      (function () {
+        var stored = localStorage.getItem("theme");
+        var prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+        var theme = stored || (prefersDark ? "dark" : "light");
+        document.documentElement.dataset.theme = theme;
+        document.documentElement.classList.add(
+          theme === "dark" ? "v-theme--scannerDark" : "v-theme--scannerLight"
+        );
+      })();
+    </script>
   </head>
   <body>
-    <!-- NavBar is interactive -->
-    <NavBar client:load />
-    <main>
+    <GlobalNav client:load />
+    <main class="content-shell">
       <slot />
     </main>
   </body>
 </html>
 
 <style is:global>
-  html, body {
-    background-color: #121212;
-    color: white;
+  :root {
+    --shell-max-width: 1440px;
+    color-scheme: light dark;
+
+    /* Design tokens — light defaults */
+    --color-bg-start: #f3f7f9;
+    --color-bg-end: #eaf3f8;
+    --color-bg-gradient-origin: #ffffff;
+    --color-surface: #ffffff;
+    --color-surface-alt: #f7fbfd;
+    --color-surface-hover: #eef4f8;
+    --color-text-primary: #0f172a;
+    --color-text-secondary: #334155;
+    --color-text-muted: #64748b;
+    --color-text-label: #516170;
+    --color-border: #d7e2e8;
+    --color-border-subtle: #e6edf2;
+    --color-link: #1d4ed8;
+    --color-link-alt: #1e40af;
+    --color-code-bg: #f8fafc;
+    --color-container-border: rgba(0, 0, 0, 0.08);
+    --color-chip-green-bg: #e8f5e9;
+    --color-chip-green-hover: #c8e6c9;
+  }
+
+  [data-theme="dark"] {
+    --color-bg-start: #0f1419;
+    --color-bg-end: #141a22;
+    --color-bg-gradient-origin: #1a2028;
+    --color-surface: #1e2530;
+    --color-surface-alt: #242c38;
+    --color-surface-hover: #2a3444;
+    --color-text-primary: #e2e8f0;
+    --color-text-secondary: #cbd5e1;
+    --color-text-muted: #94a3b8;
+    --color-text-label: #8899a8;
+    --color-border: #2d3a48;
+    --color-border-subtle: #253040;
+    --color-link: #60a5fa;
+    --color-link-alt: #93bbfc;
+    --color-code-bg: #1a2230;
+    --color-container-border: rgba(255, 255, 255, 0.08);
+    --color-chip-green-bg: #1a3a2a;
+    --color-chip-green-hover: #245038;
+  }
+
+  * {
+    box-sizing: border-box;
+  }
+
+  html,
+  body {
     margin: 0;
     padding: 0;
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+    min-height: 100%;
+    font-family: "Space Grotesk", "Avenir Next", "Segoe UI", sans-serif;
+    color: var(--color-text-primary);
+    background: radial-gradient(
+      circle at top left,
+      var(--color-bg-gradient-origin) 0%,
+      var(--color-bg-start) 45%,
+      var(--color-bg-end) 100%
+    );
   }
 
-  main {
-    min-height: calc(100vh - 64px);
+  .content-shell {
+    max-width: var(--shell-max-width);
+    margin: 0 auto;
+    padding: 1.25rem;
   }
 
-  /* Custom scrollbar for dark theme */
-  ::-webkit-scrollbar {
-    width: 8px;
-    height: 8px;
+  a {
+    color: var(--color-link);
+    text-decoration: none;
   }
 
-  ::-webkit-scrollbar-track {
-    background: #1a1a1a;
+  a:hover {
+    text-decoration: underline;
   }
 
-  ::-webkit-scrollbar-thumb {
-    background: #333;
-    border-radius: 4px;
+  @media (max-width: 959px) {
+    .content-shell {
+      padding: 0.75rem;
+    }
   }
 
-  ::-webkit-scrollbar-thumb:hover {
-    background: #444;
+  /* vue-json-pretty dark overrides */
+  [data-theme="dark"] .vjs-tree {
+    color: var(--color-text-primary);
+  }
+  [data-theme="dark"] .vjs-tree .vjs-key {
+    color: #93bbfc;
+  }
+  [data-theme="dark"] .vjs-tree .vjs-value__string {
+    color: #34d399;
+  }
+  [data-theme="dark"] .vjs-tree .vjs-value__number {
+    color: #fbbf24;
+  }
+  [data-theme="dark"] .vjs-tree .vjs-value__boolean {
+    color: #f87171;
+  }
+  [data-theme="dark"] .vjs-tree .vjs-value__null {
+    color: #94a3b8;
   }
 </style>

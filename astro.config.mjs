@@ -1,31 +1,28 @@
 // @ts-check
-import { defineConfig } from 'astro/config';
-import vue from '@astrojs/vue';
-import sitemap from '@astrojs/sitemap';
+import { defineConfig } from "astro/config";
+import vue from "@astrojs/vue";
+import sitemap from "@astrojs/sitemap";
+import node from "@astrojs/node";
 
 export default defineConfig({
-  // Required for sitemap generation - replace with your actual domain
-  site: 'https://example.com',
-
+  site: "https://agentindex.space",
+  output: "server",
+  adapter: node({
+    mode: "standalone",
+  }),
   integrations: [
     vue({
-      // Points to Vue/Vuetify initialization file
-      appEntrypoint: '/src/vue-setup.ts',
-      // Enable JSX support (optional)
-      jsx: true
+      appEntrypoint: "/src/vue-setup.ts",
+      jsx: false,
     }),
-    // Generates sitemap-index.xml at build time
-    sitemap()
+    sitemap(),
   ],
-
   vite: {
     resolve: {
-      // Prevents duplicate Vue instances
-      dedupe: ['vue'],
+      dedupe: ["vue"],
     },
     ssr: {
-      // Required for Vuetify SSR compatibility
-      noExternal: ['vuetify'],
+      noExternal: ["vuetify"],
     },
-  }
+  },
 });

@@ -1,0 +1,8 @@
+---
+import Layout from "../../layouts/Layout.astro";
+import AgentDirectoryPage from "../../components/agents/AgentDirectoryPage.vue";
+---
+
+<Layout title="AgentIndex · Agent Directory" description="Browse all registered agents with filters.">
+  <AgentDirectoryPage client:load />
+</Layout>

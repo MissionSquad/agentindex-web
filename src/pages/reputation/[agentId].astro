@@ -1,0 +1,11 @@
+---
+import Layout from "../../layouts/Layout.astro";
+import AgentReputationPage from "../../components/reputation/AgentReputationPage.vue";
+
+const { agentId } = Astro.params;
+const resolvedAgentId = agentId ?? "";
+---
+
+<Layout title={`AgentIndex · Reputation ${resolvedAgentId}`} description="Agent-scoped reputation activity and metrics.">
+  <AgentReputationPage client:load agentId={resolvedAgentId} />
+</Layout>
