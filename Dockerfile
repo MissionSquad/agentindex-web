@@ -11,6 +11,10 @@ RUN --mount=type=cache,target=/usr/local/share/.cache/yarn/$TARGETARCH,sharing=l
     corepack enable && yarn install --frozen-lockfile
 
 COPY . .
+
+ARG PUBLIC_SCANNER_API_BASE_URL=http://localhost:3100
+ENV PUBLIC_SCANNER_API_BASE_URL=$PUBLIC_SCANNER_API_BASE_URL
+
 RUN yarn build
 
 # Remove devDependencies
