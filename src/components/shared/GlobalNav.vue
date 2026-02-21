@@ -17,6 +17,7 @@ const navItems: NavItem[] = [
   { label: "Reputation", href: "/reputation", icon: "mdi-star-outline" },
   { label: "Analytics", href: "/analytics", icon: "mdi-chart-box-outline" },
   { label: "Network", href: "/network", icon: "mdi-graph-outline" },
+  { label: "API", href: "/x402", icon: "mdi-api" },
 ];
 
 const api = ScannerApiClient.fromEnv();

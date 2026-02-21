@@ -262,6 +262,58 @@ function metadataLinkIcon(kind: ResolvedMetadataLink["kind"]): string {
   if (kind === "twitter") return "mdi-twitter";
   return "mdi-web";
 }
+
+// --- Registration chain parsing ---
+
+interface ChainInfo {
+  name: string;
+  logo: string;
+}
+
+interface ParsedRegistration {
+  chainId: number;
+  contractAddress: string;
+  chain: ChainInfo | null;
+  raw: string;
+}
+
+const CHAIN_REGISTRY = new Map<number, ChainInfo>([
+  [1, { name: "Ethereum", logo: "https://cryptologos.cc/logos/ethereum-eth-logo.png" }],
+  [56, { name: "BNB Smart Chain", logo: "https://cryptologos.cc/logos/bnb-bnb-logo.png" }],
+  [137, { name: "Polygon", logo: "https://cryptologos.cc/logos/polygon-matic-logo.png" }],
+  [43114, { name: "Avalanche C-Chain", logo: "https://cryptologos.cc/logos/avalanche-avax-logo.png" }],
+  [42161, { name: "Arbitrum One", logo: "https://cryptologos.cc/logos/arbitrum-arb-logo.png" }],
+  [10, { name: "OP Mainnet", logo: "https://cryptologos.cc/logos/optimism-ethereum-op-logo.png" }],
+  [8453, { name: "Base", logo: "/base.png" }],
+  [25, { name: "Cronos", logo: "https://cryptologos.cc/logos/cronos-cro-logo.png" }],
+  [250, { name: "Fantom Opera", logo: "https://cryptologos.cc/logos/fantom-ftm-logo.png" }],
+  [5000, { name: "Mantle", logo: "https://cryptologos.cc/logos/mantle-mnt-logo.png" }],
+  [100, { name: "Gnosis", logo: "https://cryptologos.cc/logos/gnosis-gno-gno-logo.png" }],
+]);
+
+const TESTNET_CHAIN_IDS = new Set<number>([11155111]);
+
+function parseRegistration(raw: string): ParsedRegistration | null {
+  const match = raw.match(/^eip155:(\d+):(.+)$/);
+  if (!match) return null;
+
+  const chainId = parseInt(match[1], 10);
+  if (TESTNET_CHAIN_IDS.has(chainId)) return null;
+
+  return {
+    chainId,
+    contractAddress: match[2],
+    chain: CHAIN_REGISTRY.get(chainId) ?? null,
+    raw,
+  };
+}
+
+const parsedRegistrations = computed<ParsedRegistration[]>(() => {
+  const rawList = resolvedMetadata.value?.registrations ?? state.data.value?.agent.registrations ?? [];
+  return rawList
+    .map((reg) => parseRegistration(reg))
+    .filter((entry): entry is ParsedRegistration => entry !== null);
+});
 </script>
 
 <template>
@@ -399,19 +451,32 @@ function metadataLinkIcon(kind: ResolvedMetadataLink["kind"]): string {
             </div>
           </div>
 
-          <template v-if="displayServices.length > 0">
-            <p class="chip-group-label mt-3">Services</p>
-            <v-chip-group>
-              <v-chip v-for="service in displayServices" :key="service" color="secondary" size="small">{{ service }}</v-chip>
-            </v-chip-group>
-          </template>
-
-          <template v-if="(resolvedMetadata?.registrations ?? []).length > 0">
-            <p class="chip-group-label mt-3">Registrations</p>
-            <v-chip-group>
-              <v-chip v-for="reg in (resolvedMetadata?.registrations ?? [])" :key="reg" color="info" variant="outlined" size="small">{{ reg }}</v-chip>
-            </v-chip-group>
-          </template>
+          <div v-if="displayServices.length > 0 || parsedRegistrations.length > 0" class="services-registrations-row mt-3">
+            <div v-if="displayServices.length > 0" class="services-section">
+              <p class="chip-group-label">Services</p>
+              <v-chip-group>
+                <v-chip v-for="service in displayServices" :key="service" color="secondary" size="small">{{ service }}</v-chip>
+              </v-chip-group>
+            </div>
+            <div v-if="parsedRegistrations.length > 0" class="registrations-section">
+              <p class="chip-group-label">Registrations</p>
+              <div class="registration-list">
+                <v-tooltip v-for="reg in parsedRegistrations" :key="reg.raw" :text="reg.chain?.name ?? `Chain ${reg.chainId}`" location="top">
+                  <template #activator="{ props: tooltipProps }">
+                    <img
+                      v-if="reg.chain?.logo"
+                      v-bind="tooltipProps"
+                      :src="reg.chain.logo"
+                      :alt="reg.chain.name"
+                      class="chain-logo"
+                      @error="($event.target as HTMLImageElement).style.display = 'none'"
+                    />
+                    <v-icon v-else v-bind="tooltipProps" size="20" color="secondary">mdi-link-variant</v-icon>
+                  </template>
+                </v-tooltip>
+              </div>
+            </div>
+          </div>
         </v-card-text>
       </v-card>
 
@@ -835,6 +900,27 @@ function metadataLinkIcon(kind: ResolvedMetadataLink["kind"]): string {
   font-family: "JetBrains Mono", "Fira Code", monospace;
   font-size: 0.82rem;
   color: var(--color-text-secondary);
+}
+
+.services-registrations-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 2rem;
+  flex-wrap: wrap;
+}
+
+.registration-list {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.chain-logo {
+  width: 20px;
+  height: 20px;
+  object-fit: contain;
+  flex-shrink: 0;
+  cursor: default;
 }
 
 .overlay-btn {
