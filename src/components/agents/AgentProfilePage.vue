@@ -10,10 +10,9 @@ import { ScannerApiClient } from "../../lib/api-client";
 import { formatAddress, formatDurationHours, formatNumber, formatPercent, formatTimestamp, formatTxHash } from "../../lib/formatters";
 import { resolveAgentUri, needsAsyncDataResolve, resolveDataUriAsync } from "../../lib/uri-resolver";
 import type { ResolvedUri } from "../../lib/uri-resolver";
-import { extractAgentUriMetadata } from "../../lib/uri-metadata";
 import { loadAgentProfileForRoute } from "../../lib/route-loaders";
 import { useAsyncView } from "../../lib/view-state";
-import type { AgentProfileResponse, FeedbackEntry } from "../../types/api";
+import type { AgentProfileResponse, FeedbackEntry, ResolvedMetadataLink } from "../../types/api";
 
 const props = defineProps<{
   agentId: string;
@@ -78,10 +77,27 @@ const effectiveUri = computed<ResolvedUri>(() => {
   return remoteFetched.value ?? resolvedUri.value;
 });
 
-const uriMetadata = computed(() => extractAgentUriMetadata(effectiveUri.value.decoded));
+const resolvedMetadata = computed(() => state.data.value?.resolvedMetadata ?? null);
+const metadataLinks = computed<ResolvedMetadataLink[]>(() => resolvedMetadata.value?.links ?? []);
+const metadataIconLinks = computed<ResolvedMetadataLink[]>(() => {
+  const byKind = new Map<ResolvedMetadataLink["kind"], ResolvedMetadataLink>();
+  for (const link of metadataLinks.value) {
+    if (!byKind.has(link.kind)) {
+      byKind.set(link.kind, link);
+    }
+  }
+
+  const ordered: Array<ResolvedMetadataLink["kind"]> = ["web", "twitter", "email"];
+  return ordered.flatMap((kind) => (byKind.has(kind) ? [byKind.get(kind)!] : []));
+});
+const displayServices = computed<string[]>(() => {
+  const rawServices = resolvedMetadata.value?.services ?? state.data.value?.agent.services ?? [];
+  const hiddenServices = new Set(["web", "twitter", "email"]);
+  return rawServices.filter((service) => !hiddenServices.has(service.toLowerCase()));
+});
 
 const agentImageSrc = computed<string | null>(() => {
-  const raw = uriMetadata.value.image;
+  const raw = resolvedMetadata.value?.image ?? null;
   if (!raw) return null;
   if (raw.startsWith("data:")) return raw;
   return api.imageProxyUrl(raw);
@@ -240,6 +256,12 @@ function parseSummary(text: string): SummarySegment[] {
 
   return segments;
 }
+
+function metadataLinkIcon(kind: ResolvedMetadataLink["kind"]): string {
+  if (kind === "email") return "mdi-email";
+  if (kind === "twitter") return "mdi-twitter";
+  return "mdi-web";
+}
 </script>
 
 <template>
@@ -264,13 +286,13 @@ function parseSummary(text: string): SummarySegment[] {
               />
               <div>
                 <div class="title-row">
-                  <h1 class="title">{{ uriMetadata.name ?? state.data.value?.agent.name }}</h1>
+                  <h1 class="title">{{ resolvedMetadata?.name ?? state.data.value?.agent.name }}</h1>
                   <v-chip color="primary" size="small">#{{ state.data.value?.agent.agentId }}</v-chip>
                   <v-chip :color="reputationScore.color" size="small" variant="tonal">
                     Rep: {{ reputationScore.display }}
                   </v-chip>
                 </div>
-                <p class="subtitle">{{ (uriMetadata.description ?? state.data.value?.agent.description) || "No description available." }}</p>
+                <p class="subtitle">{{ (resolvedMetadata?.description ?? state.data.value?.agent.description) || "No description available." }}</p>
               </div>
             </div>
           </div>
@@ -326,53 +348,68 @@ function parseSummary(text: string): SummarySegment[] {
               <dt>Transfer Count</dt>
               <dd>{{ formatNumber(state.data.value?.agent.transferCount) }}</dd>
             </div>
-            <div v-if="uriMetadata.type !== null" class="summary-field">
-              <dt>Type</dt>
-              <dd>{{ uriMetadata.type }}</dd>
+            <div v-if="metadataIconLinks.length > 0" class="summary-field">
+              <dt>Links</dt>
+              <dd class="summary-link-icons">
+                <a
+                  v-for="link in metadataIconLinks"
+                  :key="`${link.kind}:${link.href}`"
+                  :href="link.href"
+                  :target="link.kind === 'email' ? undefined : '_blank'"
+                  :rel="link.kind === 'email' ? undefined : 'noreferrer noopener'"
+                  :title="link.endpoint"
+                  :aria-label="`${link.kind} link`"
+                  class="summary-link-anchor"
+                >
+                  <v-chip color="info" variant="text" size="small" class="summary-link-chip">
+                    <v-icon size="16">{{ metadataLinkIcon(link.kind) }}</v-icon>
+                  </v-chip>
+                </a>
+              </dd>
             </div>
-            <div v-if="uriMetadata.active !== null" class="summary-field">
+            <div v-if="resolvedMetadata?.active !== null" class="summary-field">
               <dt>Active</dt>
               <dd>
-                <v-chip :color="uriMetadata.active ? 'success' : 'default'" size="small">
-                  {{ uriMetadata.active ? "Yes" : "No" }}
+                <v-chip :color="resolvedMetadata?.active ? 'success' : 'default'" size="small">
+                  {{ resolvedMetadata?.active ? "Yes" : "No" }}
                 </v-chip>
               </dd>
             </div>
-            <div v-if="uriMetadata.erc8004Support !== null" class="summary-field">
+            <div v-if="resolvedMetadata?.erc8004Support !== null" class="summary-field">
               <dt>ERC-8004 Support</dt>
               <dd>
-                <v-chip :color="uriMetadata.erc8004Support ? 'success' : 'default'" size="small">
-                  {{ uriMetadata.erc8004Support ? "Enabled" : "Disabled" }}
+                <v-chip :color="resolvedMetadata?.erc8004Support ? 'success' : 'default'" size="small">
+                  {{ resolvedMetadata?.erc8004Support ? "Enabled" : "Disabled" }}
                 </v-chip>
               </dd>
             </div>
             <div class="summary-field">
               <dt>x402 Support</dt>
               <dd>
-                <v-chip :color="(uriMetadata.x402Support ?? state.data.value?.agent.x402Support) ? 'success' : 'default'" size="small">
-                  {{ (uriMetadata.x402Support ?? state.data.value?.agent.x402Support) ? "Enabled" : "Disabled" }}
+                <v-chip :color="(resolvedMetadata?.x402Support ?? state.data.value?.agent.x402Support) ? 'success' : 'default'" size="small">
+                  {{ (resolvedMetadata?.x402Support ?? state.data.value?.agent.x402Support) ? "Enabled" : "Disabled" }}
                 </v-chip>
               </dd>
             </div>
-            <div v-if="uriMetadata.supportedTrusts && uriMetadata.supportedTrusts.length > 0" class="summary-field">
+            <div v-if="(resolvedMetadata?.supportedTrusts ?? []).length > 0" class="summary-field">
               <dt>Supported Trusts</dt>
               <dd>
-                <v-chip v-for="trust in uriMetadata.supportedTrusts" :key="trust" color="info" variant="outlined" size="small" class="mr-1 mb-1">{{ trust }}</v-chip>
+                <v-chip v-for="trust in (resolvedMetadata?.supportedTrusts ?? [])" :key="trust" color="info" variant="outlined" size="small" class="mr-1 mb-1">{{ trust }}</v-chip>
               </dd>
             </div>
           </div>
 
-          <template v-if="(uriMetadata.services ?? state.data.value?.agent.services ?? []).length > 0">
+          <template v-if="displayServices.length > 0">
             <p class="chip-group-label mt-3">Services</p>
             <v-chip-group>
-              <v-chip v-for="service in (uriMetadata.services ?? state.data.value?.agent.services ?? [])" :key="service" color="secondary" size="small">{{ service }}</v-chip>
+              <v-chip v-for="service in displayServices" :key="service" color="secondary" size="small">{{ service }}</v-chip>
             </v-chip-group>
           </template>
 
-          <template v-if="uriMetadata.registrations && uriMetadata.registrations.length > 0">
+          <template v-if="(resolvedMetadata?.registrations ?? []).length > 0">
             <p class="chip-group-label mt-3">Registrations</p>
             <v-chip-group>
-              <v-chip v-for="reg in uriMetadata.registrations" :key="reg" color="info" variant="outlined" size="small">{{ reg }}</v-chip>
+              <v-chip v-for="reg in (resolvedMetadata?.registrations ?? [])" :key="reg" color="info" variant="outlined" size="small">{{ reg }}</v-chip>
             </v-chip-group>
           </template>
         </v-card-text>
@@ -755,6 +792,26 @@ function parseSummary(text: string): SummarySegment[] {
   letter-spacing: 0.05em;
   color: var(--color-text-label);
   margin-bottom: 0.25rem;
+}
+
+.summary-link-icons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  align-items: center;
+}
+
+.summary-link-anchor {
+  text-decoration: none;
+}
+
+.summary-link-anchor :deep(.v-chip) {
+  cursor: pointer;
+}
+
+.summary-link-chip {
+  min-width: 34px;
+  justify-content: center;
 }
 
 .uri-cell {

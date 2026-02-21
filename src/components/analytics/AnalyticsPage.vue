@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed } from "vue";
 import AsyncStateGate from "../shared/AsyncStateGate.vue";
 import LineSeriesChart from "../shared/LineSeriesChart.vue";
 import TagTreemap from "../shared/TagTreemap.vue";
@@ -8,8 +8,6 @@ import { formatComputedNumber, formatComputedPercent, formatNumber, formatPercen
 import { resolveChartState } from "../../lib/chart-state";
 import type { ChartStateContext } from "../../lib/chart-state";
 import { useAsyncView } from "../../lib/view-state";
-import { resolveAgentUri, needsAsyncDataResolve, resolveDataUriAsync } from "../../lib/uri-resolver";
-import { extractAgentUriMetadata } from "../../lib/uri-metadata";
 import type { AnalyticsOverviewResponse, TopAgentSummary, WindowedValue } from "../../types/api";
 
 const api = ScannerApiClient.fromEnv();
@@ -96,65 +94,14 @@ const topAgentsByReputation = computed(() => {
     .slice(0, 10);
 });
 
-const FETCHABLE_SCHEMES = new Set<string>(["http", "ipfs"]);
-const topAgentMeta = ref(new Map<string, { name: string; imageSrc: string | null }>());
-
-watch(topAgents, async (agents) => {
-  if (agents.length === 0) return;
-
-  const map = new Map<string, { name: string; imageSrc: string | null }>();
-
-  await Promise.all(
-    agents.map(async (agent) => {
-      if (!agent.agentUri) {
-        map.set(agent.agentId, { name: `Agent ${agent.agentId}`, imageSrc: null });
-        return;
-      }
-
-      let resolved = resolveAgentUri(agent.agentUri);
-
-      if (needsAsyncDataResolve(resolved)) {
-        try {
-          resolved = await resolveDataUriAsync(agent.agentUri);
-        } catch {
-          // fallback
-        }
-      }
-
-      if (FETCHABLE_SCHEMES.has(resolved.scheme) && resolved.decoded === null) {
-        try {
-          const fetched = await api.resolveUri(resolved.raw);
-          if (fetched.contentType === "application/json" && fetched.body !== null) {
-            resolved = { scheme: resolved.scheme, raw: resolved.raw, decoded: fetched.body, error: null };
-          }
-        } catch {
-          // fallback
-        }
-      }
-
-      const metadata = extractAgentUriMetadata(resolved.decoded);
-      const rawImage = metadata.image;
-      let imageSrc: string | null = null;
-      if (rawImage) {
-        imageSrc = rawImage.startsWith("data:") ? rawImage : api.imageProxyUrl(rawImage);
-      }
-
-      map.set(agent.agentId, {
-        name: metadata.name ?? `Agent ${agent.agentId}`,
-        imageSrc,
-      });
-    }),
-  );
-
-  topAgentMeta.value = map;
-}, { immediate: true });
-
 function agentName(agent: TopAgentSummary): string {
-  return topAgentMeta.value.get(agent.agentId)?.name ?? `Agent ${agent.agentId}`;
+  return agent.name ?? `Agent ${agent.agentId}`;
 }
 
 function agentImage(agent: TopAgentSummary): string | null {
-  return topAgentMeta.value.get(agent.agentId)?.imageSrc ?? null;
+  if (!agent.imageUrl) return null;
+  if (agent.imageUrl.startsWith("data:")) return agent.imageUrl;
+  return api.imageProxyUrl(agent.imageUrl);
 }
 
 const topAgentHeaders = [

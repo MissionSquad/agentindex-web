@@ -8,7 +8,6 @@ import { ScannerApiClient } from "../../lib/api-client";
 import { formatAddress, formatNumber, formatPercent, formatTimestamp, formatTxHash } from "../../lib/formatters";
 import { useAsyncView } from "../../lib/view-state";
 import { resolveAgentUri, needsAsyncDataResolve, resolveDataUriAsync } from "../../lib/uri-resolver";
-import { extractAgentUriMetadata } from "../../lib/uri-metadata";
 import type { ReputationResponse, ResponseEntry } from "../../types/api";
 
 const api = ScannerApiClient.fromEnv();
@@ -18,8 +17,6 @@ const FETCHABLE_SCHEMES = new Set<string>(["http", "ipfs"]);
 const filters = reactive({
   page: 1,
   limit: 25,
-  tag: "",
-  endpoint: "",
 });
 
 const state = useAsyncView<ReputationResponse>(
@@ -27,8 +24,6 @@ const state = useAsyncView<ReputationResponse>(
     api.getReputation({
       page: filters.page,
       limit: filters.limit,
-      tag: filters.tag || undefined,
-      endpoint: filters.endpoint || undefined,
     }),
   (payload) => payload.recentFeedback.items.length === 0 && payload.recentResponses.items.length === 0,
   false,
@@ -44,7 +39,7 @@ const totalPages = computed(() => {
 });
 
 watch(
-  () => [filters.page, filters.limit, filters.tag, filters.endpoint],
+  () => [filters.page, filters.limit],
   () => {
     void state.refresh();
   },
@@ -54,72 +49,8 @@ onMounted(() => {
   void state.refresh();
 });
 
-// Resolve agent URIs to get JSON-derived names for the Agent column
-const agentNameMap = ref(new Map<string, string>());
-
-async function resolveAgentName(agentId: string): Promise<string | null> {
-  try {
-    const profile = await api.getAgent(agentId);
-    const agentUri = profile.currentUri || profile.agent.agentUri;
-    if (!agentUri) return null;
-
-    let resolved = resolveAgentUri(agentUri);
-
-    if (needsAsyncDataResolve(resolved)) {
-      try {
-        resolved = await resolveDataUriAsync(agentUri);
-      } catch {
-        return null;
-      }
-    }
-
-    if (FETCHABLE_SCHEMES.has(resolved.scheme) && resolved.decoded === null && !resolved.error) {
-      try {
-        const fetched = await api.resolveUri(resolved.raw);
-        if (fetched.contentType === "application/json" && fetched.body !== null) {
-          resolved = { scheme: resolved.scheme, raw: resolved.raw, decoded: fetched.body, error: null };
-        }
-      } catch {
-        return null;
-      }
-    }
-
-    const metadata = extractAgentUriMetadata(resolved.decoded);
-    return metadata.name;
-  } catch {
-    return null;
-  }
-}
-
-watch(
-  () => state.data.value,
-  async (data) => {
-    if (!data) return;
-
-    const agentIds = new Set<string>();
-    data.recentResponses.items.forEach((item) => agentIds.add(item.agentId));
-    data.recentFeedback.items.forEach((item) => agentIds.add(item.agentId));
-
-    if (agentIds.size === 0) return;
-
-    const map = new Map<string, string>();
-
-    await Promise.all(
-      Array.from(agentIds).map(async (agentId) => {
-        const name = await resolveAgentName(agentId);
-        if (name) {
-          map.set(agentId, name);
-        }
-      }),
-    );
-
-    agentNameMap.value = map;
-  },
-  { immediate: true },
-);
-
 function displayAgentName(agentId: string): string {
-  return agentNameMap.value.get(agentId) ?? agentId;
+  return state.data.value?.agentNames?.[agentId] ?? agentId;
 }
 
 const feedbackHeaders = [
@@ -213,28 +144,11 @@ function truncateText(text: string, maxLength: number): string {
 
 <template>
   <section>
-    <v-card border class="mb-4">
-      <v-card-title>Reputation Filters</v-card-title>
-      <v-card-text>
-        <v-row dense>
-          <v-col cols="12" md="4">
-            <v-text-field v-model="filters.tag" label="Tag" />
-          </v-col>
-          <v-col cols="12" md="4">
-            <v-text-field v-model="filters.endpoint" label="Endpoint" />
-          </v-col>
-          <v-col cols="12" md="4" class="d-flex justify-end align-center">
-            <v-btn color="primary" @click="filters.page = 1">Apply</v-btn>
-          </v-col>
-        </v-row>
-      </v-card-text>
-    </v-card>
-
     <AsyncStateGate
       :status="state.status.value"
       :error-message="state.errorMessage.value"
       empty-title="No reputation rows"
-      empty-description="No feedback or response activity matched the filters."
+      empty-description="No feedback or response activity available."
       @retry="state.refresh"
     >
       <v-row dense class="mb-2">

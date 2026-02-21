@@ -25,6 +25,11 @@ const mockAgentResponse: AgentProfileResponse = {
     tags: [],
     services: [],
     x402Support: false,
+    type: null,
+    active: null,
+    erc8004Support: null,
+    registrations: [],
+    supportedTrusts: [],
     registrationTxHash: "0x1111111111111111111111111111111111111111111111111111111111111111",
     registrationTimestamp: 0,
     hasBeenTransferred: false,
@@ -34,6 +39,7 @@ const mockAgentResponse: AgentProfileResponse = {
     averageReputation: null,
     lastActiveTimestamp: null,
   },
+  resolvedMetadata: null,
   payoutWallet: null,
   currentUri: "",
   reputationSummary: { count: 0, summaryValue: 0, summaryValueDecimals: 0 },
@@ -89,6 +95,7 @@ const mockReputationResponse: ReputationResponse = {
   },
   recentFeedback: { items: [], meta: { page: 1, limit: 25, total: 0, hasNextPage: false } },
   recentResponses: { items: [], meta: { page: 1, limit: 25, total: 0, hasNextPage: false } },
+  agentNames: {},
 };
 
 const mockAddressResponse: AddressProfileResponse = {
@@ -144,6 +151,7 @@ const mockTxResponse: TransactionDetailResponse = {
     normalizedArgs: {},
   },
   eventFacts: [],
+  relatedAgents: [],
 };
 
 describe("route loaders", () => {

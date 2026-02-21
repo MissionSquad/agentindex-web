@@ -58,6 +58,15 @@ export interface SearchQuery {
   chainId?: number;
 }
 
+export type AgentMetadataSearchStatus = "resolved" | "failed" | "pending" | "all";
+
+export interface AgentMetadataSearchQuery extends SearchQuery {
+  status?: AgentMetadataSearchStatus;
+  x402Support?: boolean;
+  active?: boolean;
+  includeRaw?: boolean;
+}
+
 export interface AgentSummary {
   chainId: number;
   agentId: string;
@@ -70,6 +79,11 @@ export interface AgentSummary {
   tags: string[];
   services: string[];
   x402Support: boolean;
+  type: string | null;
+  active: boolean | null;
+  erc8004Support: boolean | null;
+  registrations: string[];
+  supportedTrusts: string[];
   registrationTxHash: string;
   registrationTimestamp: number;
   hasBeenTransferred: boolean;
@@ -168,6 +182,7 @@ export interface TrustMetrics {
 
 export interface AgentProfileResponse {
   agent: AgentSummary;
+  resolvedMetadata: ResolvedAgentMetadata | null;
   payoutWallet: string | null;
   currentUri: string;
   reputationSummary: {
@@ -212,6 +227,7 @@ export interface ReputationResponse {
   heuristics: ReputationHeuristics;
   recentFeedback: PaginatedResult<FeedbackEntry>;
   recentResponses: PaginatedResult<ResponseEntry>;
+  agentNames: Record<string, string>;
 }
 
 export interface AddressOwnerSection {
@@ -289,6 +305,11 @@ export interface TransactionDetailResponse {
   transactionFact: TransactionEnvelope;
   callFact: CallFact;
   eventFacts: EventFact[];
+  relatedAgents: Array<{
+    agentId: string;
+    name: string;
+    imageUrl: string | null;
+  }>;
 }
 
 export interface TimeSeriesPoint {
@@ -321,8 +342,34 @@ export interface TopAgentSummary {
   agentId: string;
   value: number;
   agentUri: string;
+  name: string | null;
+  imageUrl: string | null;
   reputationScore: number | null;
   clientDiversity: number | null;
+}
+
+export interface ResolvedAgentMetadata {
+  links: ResolvedMetadataLink[];
+  name: string | null;
+  description: string | null;
+  type: string | null;
+  image: string | null;
+  active: boolean | null;
+  x402Support: boolean | null;
+  erc8004Support: boolean | null;
+  services: string[];
+  registrations: string[];
+  supportedTrusts: string[];
+  resolveStatus: "resolved" | "failed" | "pending";
+  resolvedAt: number;
+}
+
+export interface ResolvedMetadataLink {
+  kind: "web" | "email" | "twitter";
+  label: string;
+  href: string;
+  endpoint: string;
+  serviceName: string | null;
 }
 
 export interface AnalyticsOverviewResponse {
@@ -420,6 +467,30 @@ export interface SearchResultItem {
 export interface SearchResponse {
   query: string;
   results: PaginatedResult<SearchResultItem>;
+}
+
+export interface AgentMetadataSearchItem {
+  chainId: number;
+  agentId: string;
+  uri: string;
+  name: string | null;
+  description: string | null;
+  type: string | null;
+  image: string | null;
+  active: boolean | null;
+  x402Support: boolean | null;
+  erc8004Support: boolean | null;
+  services: string[];
+  registrations: string[];
+  supportedTrusts: string[];
+  resolveStatus: "resolved" | "failed" | "pending";
+  resolvedAt: number;
+}
+
+export interface AgentMetadataSearchResponse {
+  query: string;
+  filters: Record<string, unknown>;
+  results: PaginatedResult<AgentMetadataSearchItem>;
 }
 
 export interface HealthResponse {

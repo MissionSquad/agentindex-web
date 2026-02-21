@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, ref } from "vue";
 import VueJsonPretty from "vue-json-pretty";
 import "vue-json-pretty/lib/styles.css";
 import AsyncStateGate from "../shared/AsyncStateGate.vue";
@@ -7,9 +7,8 @@ import CopyButton from "../shared/CopyButton.vue";
 import { ScannerApiClient } from "../../lib/api-client";
 import { formatAddress, formatKeyValueMap, formatMiddleTruncate, formatTimestamp, formatTxHash } from "../../lib/formatters";
 import { isEthereumAddress } from "../../lib/query";
-import { resolveAgentUri, needsAsyncDataResolve, resolveDataUriAsync } from "../../lib/uri-resolver";
+import { resolveAgentUri } from "../../lib/uri-resolver";
 import type { ResolvedUri } from "../../lib/uri-resolver";
-import { extractAgentUriMetadata } from "../../lib/uri-metadata";
 import { loadTransactionForRoute } from "../../lib/route-loaders";
 import { useAsyncView } from "../../lib/view-state";
 import type { TransactionDetailResponse } from "../../types/api";
@@ -91,97 +90,22 @@ const formattedEvents = computed(() => {
   }));
 });
 
-// Extract unique agent IDs from call args and event args
-const involvedAgentIds = computed<string[]>(() => {
-  const ids = new Set<string>();
-  const data = state.data.value;
-  if (!data) return [];
-
-  const scanRecord = (record: Record<string, unknown>): void => {
-    for (const [key, value] of Object.entries(record)) {
-      if (AGENT_ID_KEYS.has(key) && typeof value === "string" && /^\d+$/.test(value)) {
-        ids.add(value);
-      } else if (AGENT_ID_KEYS.has(key) && typeof value === "number" && Number.isFinite(value)) {
-        ids.add(String(value));
-      }
-    }
-  };
-
-  scanRecord(data.callFact.normalizedArgs);
-  data.eventFacts.forEach((evt) => scanRecord(evt.eventArgs));
-
-  return Array.from(ids);
-});
-
-// Resolve agent profiles to get name + image
 interface ResolvedAgent {
   agentId: string;
   name: string;
   imageSrc: string | null;
 }
 
-const resolvedAgents = ref<ResolvedAgent[]>([]);
-
-watch(involvedAgentIds, async (agentIds) => {
-  if (agentIds.length === 0) {
-    resolvedAgents.value = [];
-    return;
-  }
-
-  const results: ResolvedAgent[] = [];
-
-  await Promise.all(
-    agentIds.map(async (agentId) => {
-      try {
-        const profile = await api.getAgent(agentId);
-        const agentUri = profile.currentUri || profile.agent.agentUri;
-
-        if (!agentUri) {
-          results.push({ agentId, name: profile.agent.name || `Agent ${agentId}`, imageSrc: null });
-          return;
-        }
-
-        let resolved = resolveAgentUri(agentUri);
-
-        if (needsAsyncDataResolve(resolved)) {
-          try {
-            resolved = await resolveDataUriAsync(agentUri);
-          } catch {
-            // fallback
-          }
-        }
-
-        if (FETCHABLE_SCHEMES.has(resolved.scheme) && resolved.decoded === null && !resolved.error) {
-          try {
-            const fetched = await api.resolveUri(resolved.raw);
-            if (fetched.contentType === "application/json" && fetched.body !== null) {
-              resolved = { scheme: resolved.scheme, raw: resolved.raw, decoded: fetched.body, error: null };
-            }
-          } catch {
-            // fallback
-          }
-        }
-
-        const metadata = extractAgentUriMetadata(resolved.decoded);
-        const rawImage = metadata.image;
-        let imageSrc: string | null = null;
-        if (rawImage) {
-          imageSrc = rawImage.startsWith("data:") ? rawImage : api.imageProxyUrl(rawImage);
-        }
-
-        results.push({
-          agentId,
-          name: metadata.name ?? (profile.agent.name || `Agent ${agentId}`),
-          imageSrc,
-        });
-      } catch {
-        results.push({ agentId, name: `Agent ${agentId}`, imageSrc: null });
-      }
-    }),
-  );
-
-  resolvedAgents.value = results;
-}, { immediate: true });
+const resolvedAgents = computed<ResolvedAgent[]>(() => {
+  const relatedAgents = state.data.value?.relatedAgents ?? [];
+  return relatedAgents.map((entry) => ({
+    agentId: entry.agentId,
+    name: entry.name || `Agent ${entry.agentId}`,
+    imageSrc: entry.imageUrl
+      ? (entry.imageUrl.startsWith("data:") ? entry.imageUrl : api.imageProxyUrl(entry.imageUrl))
+      : null,
+  }));
+});
 
 // URI overlay state
 const uriOverlayOpen = ref(false);

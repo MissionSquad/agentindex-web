@@ -35,7 +35,7 @@ const NODE_KIND_COLORS: Record<GraphNode["kind"], string> = {
   address: "#0B5E67",
   feedback: "#64748B",
 };
-const showLabels = ref(false);
+const showLabels = ref(true);
 const nodeDetailOpen = ref(false);
 const selectedNodeId = ref<string | null>(null);
 const layoutRunId = ref(0);

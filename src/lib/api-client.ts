@@ -1,4 +1,7 @@
 import {
+  type AgentMetadataSearchItem,
+  type AgentMetadataSearchQuery,
+  type AgentMetadataSearchResponse,
   type AddressProfileResponse,
   type AgentListQuery,
   type AgentProfileResponse,
@@ -19,9 +22,12 @@ import {
   type PaginationMeta,
   type ReputationListQuery,
   type ReputationResponse,
+  type ResolvedAgentMetadata,
+  type ResolvedMetadataLink,
   type ResolveUriResponse,
   type ResponseEntry,
   type SearchQuery,
+  type SearchResultItem,
   type SearchResponse,
   type TimeSeriesPoint,
   type TopAgentSummary,
@@ -168,19 +174,25 @@ function parsePaginated<T>(value: unknown, parser: (entry: unknown) => T): Pagin
 
 function parseAgentSummary(value: unknown): AgentSummary {
   const record = asRecord(value);
+  const agentId = toStringValue(record.agentId);
 
   return {
     chainId: toNumberValue(record.chainId, 1),
-    agentId: toStringValue(record.agentId),
+    agentId,
     ownerAddress: toStringValue(record.ownerAddress ?? record.owner),
     originalRegistrant: toStringValue(record.originalRegistrant ?? record.registrant),
     agentUri: toStringValue(record.agentUri ?? record.agentURI ?? record.currentUri),
-    name: toStringValue(record.name, "Unnamed Agent"),
+    name: toStringValue(record.name, agentId ? `Agent ${agentId}` : "Unnamed Agent"),
     description: toStringValue(record.description),
     imageUrl: typeof record.imageUrl === "string" ? record.imageUrl : null,
     tags: toStringArray(record.tags),
     services: toStringArray(record.services),
     x402Support: toBooleanValue(record.x402Support),
+    type: typeof record.type === "string" ? record.type : null,
+    active: typeof record.active === "boolean" ? record.active : null,
+    erc8004Support: typeof record.erc8004Support === "boolean" ? record.erc8004Support : null,
+    registrations: toStringArray(record.registrations),
+    supportedTrusts: toStringArray(record.supportedTrusts),
     registrationTxHash: toStringValue(record.registrationTxHash),
     registrationTimestamp: toNumberValue(record.registrationTimestamp),
     hasBeenTransferred: toBooleanValue(record.hasBeenTransferred),
@@ -435,8 +447,85 @@ function parseTopAgentSummary(value: unknown): TopAgentSummary {
     agentId: toStringValue(record.agentId),
     value: toNumberValue(record.value),
     agentUri: toStringValue(record.agentUri),
+    name: typeof record.name === "string" ? record.name : null,
+    imageUrl: typeof record.imageUrl === "string" ? record.imageUrl : null,
     reputationScore: toNullableNumberValue(record.reputationScore),
     clientDiversity: toNullableNumberValue(record.clientDiversity),
+  };
+}
+
+function isAllowedLinkHref(value: string): boolean {
+  if (value.startsWith("mailto:")) {
+    return value.length > "mailto:".length;
+  }
+
+  try {
+    const parsed = new URL(value);
+    const protocol = parsed.protocol.toLowerCase();
+    return protocol === "http:" || protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+function parseResolvedMetadataLink(value: unknown): ResolvedMetadataLink | null {
+  const record = asRecord(value);
+  if (record.kind !== "web" && record.kind !== "email" && record.kind !== "twitter") {
+    return null;
+  }
+
+  const href = toStringValue(record.href);
+  if (!isAllowedLinkHref(href)) {
+    return null;
+  }
+
+  const label = toStringValue(record.label);
+  if (label.length === 0) {
+    return null;
+  }
+
+  const endpoint = toStringValue(record.endpoint);
+  if (endpoint.length === 0) {
+    return null;
+  }
+
+  const serviceName = typeof record.serviceName === "string" ? record.serviceName : null;
+
+  return {
+    kind: record.kind,
+    label,
+    href,
+    endpoint,
+    serviceName,
+  };
+}
+
+function parseResolvedMetadata(value: unknown): ResolvedAgentMetadata | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const links = toRecordArray(value.links)
+    .map((entry) => parseResolvedMetadataLink(entry))
+    .filter((entry): entry is ResolvedMetadataLink => entry !== null);
+
+  return {
+    links,
+    name: typeof value.name === "string" ? value.name : null,
+    description: typeof value.description === "string" ? value.description : null,
+    type: typeof value.type === "string" ? value.type : null,
+    image: typeof value.image === "string" ? value.image : null,
+    active: typeof value.active === "boolean" ? value.active : null,
+    x402Support: typeof value.x402Support === "boolean" ? value.x402Support : null,
+    erc8004Support: typeof value.erc8004Support === "boolean" ? value.erc8004Support : null,
+    services: toStringArray(value.services),
+    registrations: toStringArray(value.registrations),
+    supportedTrusts: toStringArray(value.supportedTrusts),
+    resolveStatus:
+      value.resolveStatus === "resolved" || value.resolveStatus === "failed" || value.resolveStatus === "pending"
+        ? value.resolveStatus
+        : "pending",
+    resolvedAt: toNumberValue(value.resolvedAt),
   };
 }
 
@@ -586,6 +675,13 @@ function parseReputationResponse(value: unknown): ReputationResponse {
     },
     recentFeedback: parsePaginated(recentFeedbackSource, parseFeedbackEntry),
     recentResponses: parsePaginated(recentResponsesSource, parseResponseEntry),
+    agentNames: isRecord(record.agentNames)
+      ? Object.fromEntries(
+          Object.entries(record.agentNames)
+            .filter(([, value]) => typeof value === "string")
+            .map(([key, value]) => [key, value as string]),
+        )
+      : {},
   };
 }
 
@@ -648,6 +744,11 @@ function parseTransactionDetailResponse(value: unknown): TransactionDetailRespon
     transactionFact: parseTransactionEnvelope(record.transactionFact ?? record.transaction),
     callFact: parseCallFact(record.callFact ?? record.call),
     eventFacts: toRecordArray(record.eventFacts ?? record.events).map((entry) => parseEventFact(entry)),
+    relatedAgents: toRecordArray(record.relatedAgents).map((entry) => ({
+      agentId: toStringValue(entry.agentId),
+      name: toStringValue(entry.name, `Agent ${toStringValue(entry.agentId)}`),
+      imageUrl: typeof entry.imageUrl === "string" ? entry.imageUrl : null,
+    })),
   };
 }
 
@@ -691,6 +792,7 @@ function parseAgentProfileResponse(value: unknown): AgentProfileResponse {
 
   return {
     agent: parseAgentSummary(record.agent),
+    resolvedMetadata: parseResolvedMetadata(record.resolvedMetadata),
     payoutWallet: typeof record.payoutWallet === "string" ? record.payoutWallet : null,
     currentUri: toStringValue(record.currentUri),
     reputationSummary: {
@@ -762,6 +864,51 @@ function parseSearchResponse(value: unknown): SearchResponse {
   return {
     query: toStringValue(record.query ?? record.q),
     results: paginated,
+  };
+}
+
+function parseMetadataSearchStatus(value: unknown): "resolved" | "failed" | "pending" {
+  return value === "resolved" || value === "failed" || value === "pending" ? value : "pending";
+}
+
+function parseAgentMetadataSearchItem(value: unknown): AgentMetadataSearchItem {
+  const record = asRecord(value);
+  return {
+    chainId: toNumberValue(record.chainId, 1),
+    agentId: toStringValue(record.agentId),
+    uri: toStringValue(record.uri),
+    name: typeof record.name === "string" ? record.name : null,
+    description: typeof record.description === "string" ? record.description : null,
+    type: typeof record.type === "string" ? record.type : null,
+    image: typeof record.image === "string" ? record.image : null,
+    active: typeof record.active === "boolean" ? record.active : null,
+    x402Support: typeof record.x402Support === "boolean" ? record.x402Support : null,
+    erc8004Support: typeof record.erc8004Support === "boolean" ? record.erc8004Support : null,
+    services: toStringArray(record.services),
+    registrations: toStringArray(record.registrations),
+    supportedTrusts: toStringArray(record.supportedTrusts),
+    resolveStatus: parseMetadataSearchStatus(record.resolveStatus),
+    resolvedAt: toNumberValue(record.resolvedAt),
+  };
+}
+
+function parseAgentMetadataSearchResponse(value: unknown): AgentMetadataSearchResponse {
+  const record = asRecord(value);
+  return {
+    query: toStringValue(record.query ?? record.q),
+    filters: isRecord(record.filters) ? record.filters : {},
+    results: parsePaginated(record.results, parseAgentMetadataSearchItem),
+  };
+}
+
+function toSearchResultFromMetadataItem(item: AgentMetadataSearchItem): SearchResultItem {
+  const id = item.agentId;
+  return {
+    type: "agent",
+    id,
+    title: item.name ?? `Agent ${id}`,
+    subtitle: `Agent ${id}`,
+    route: `/agents/${id}`,
   };
 }
 
@@ -922,7 +1069,29 @@ export class ScannerApiClient {
     return this.request("/v1/network/graph", toQueryRecord(params), parseNetworkGraphResponse);
   }
 
+  public async searchAgents(params: AgentMetadataSearchQuery): Promise<AgentMetadataSearchResponse> {
+    return this.request("/v1/search/agents", toQueryRecord(params), parseAgentMetadataSearchResponse);
+  }
+
   public async search(params: SearchQuery): Promise<SearchResponse> {
+    try {
+      const metadataResponse = await this.searchAgents({
+        ...params,
+        status: "resolved",
+      });
+      if (metadataResponse.results.items.length > 0) {
+        return {
+          query: metadataResponse.query,
+          results: {
+            items: metadataResponse.results.items.map((item) => toSearchResultFromMetadataItem(item)),
+            meta: metadataResponse.results.meta,
+          },
+        };
+      }
+    } catch {
+      // Fall back to legacy mixed-entity search when metadata search is unavailable.
+    }
+
     return this.request("/v1/search", toQueryRecord(params), parseSearchResponse);
   }
 
