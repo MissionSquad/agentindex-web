@@ -2,7 +2,7 @@
 import { computed, ref, watch } from "vue";
 import AsyncStateGate from "../shared/AsyncStateGate.vue";
 import LineSeriesChart from "../shared/LineSeriesChart.vue";
-import HeatmapTable from "../shared/HeatmapTable.vue";
+import TagTreemap from "../shared/TagTreemap.vue";
 import { ScannerApiClient } from "../../lib/api-client";
 import { formatComputedNumber, formatComputedPercent, formatNumber, formatPercent } from "../../lib/formatters";
 import { resolveChartState } from "../../lib/chart-state";
@@ -213,7 +213,14 @@ const topAgentHeaders = [
         </v-col>
       </v-row>
 
-      <!-- Row 3: Top Agents tables -->
+      <!-- Row 3: Tag Treemap -->
+      <v-row dense class="mt-2">
+        <v-col cols="12">
+          <TagTreemap :data="state.data.value?.charts.tagHeatmap ?? []" />
+        </v-col>
+      </v-row>
+
+      <!-- Row 4: Top Agents tables -->
       <v-row dense class="mt-2">
         <v-col cols="12" md="6">
           <v-card border>
@@ -293,11 +300,8 @@ const topAgentHeaders = [
         </v-col>
       </v-row>
 
-      <!-- Row 5: Heatmap + Time to First Feedback -->
+      <!-- Row 6: Time to First Feedback -->
       <v-row dense class="mt-2">
-        <v-col cols="12" md="6">
-          <HeatmapTable title="Tag Heatmap" :rows="state.data.value?.charts.tagHeatmap ?? []" />
-        </v-col>
         <v-col cols="12" md="6">
           <v-card border>
             <v-card-title>Time to First Feedback</v-card-title>
