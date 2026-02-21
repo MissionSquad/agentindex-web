@@ -1,14 +1,16 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, ref, watch } from "vue";
 import AsyncStateGate from "../shared/AsyncStateGate.vue";
 import LineSeriesChart from "../shared/LineSeriesChart.vue";
 import HeatmapTable from "../shared/HeatmapTable.vue";
 import { ScannerApiClient } from "../../lib/api-client";
-import { formatComputedNumber, formatComputedPercent, formatNumber } from "../../lib/formatters";
+import { formatComputedNumber, formatComputedPercent, formatNumber, formatPercent } from "../../lib/formatters";
 import { resolveChartState } from "../../lib/chart-state";
 import type { ChartStateContext } from "../../lib/chart-state";
 import { useAsyncView } from "../../lib/view-state";
-import type { AnalyticsOverviewResponse, WindowedValue } from "../../types/api";
+import { resolveAgentUri, needsAsyncDataResolve, resolveDataUriAsync } from "../../lib/uri-resolver";
+import { extractAgentUriMetadata } from "../../lib/uri-metadata";
+import type { AnalyticsOverviewResponse, TopAgentSummary, WindowedValue } from "../../types/api";
 
 const api = ScannerApiClient.fromEnv();
 
@@ -51,15 +53,6 @@ const clientGrowthState = computed(() =>
 const responderGrowthState = computed(() =>
   resolveChartState("responderGrowth", state.data.value?.charts.responderGrowth ?? [], chartCtx.value),
 );
-const integrityHealthState = computed(() =>
-  resolveChartState("integrityHealth", state.data.value?.charts.integrityHealth ?? [], chartCtx.value),
-);
-const feedbackVelocityState = computed(() =>
-  resolveChartState("selectedAgentFeedbackVelocity", state.data.value?.charts.selectedAgentFeedbackVelocity ?? [], chartCtx.value),
-);
-const revocationVolumeState = computed(() =>
-  resolveChartState("revocationVolume", state.data.value?.charts.revocationVolume ?? [], chartCtx.value),
-);
 
 function formatWindowedNumber(value: WindowedValue): string {
   return `${formatComputedNumber(value.d24h)} / ${formatComputedNumber(value.d7d)} / ${formatComputedNumber(value.d30d)}`;
@@ -91,6 +84,86 @@ const pointHeuristicRows = computed(() => {
     { label: "Responder Concentration", value: formatComputedNumber(data.heuristics.responderConcentration) },
   ];
 });
+
+// Top agents tables (matching Dashboard pattern)
+const topAgents = computed(() => state.data.value?.charts.topAgentsByFeedback ?? []);
+
+const topAgentsByReputation = computed(() => {
+  const agents = state.data.value?.charts.topAgentsByFeedback ?? [];
+  return [...agents]
+    .filter((a) => a.reputationScore !== null)
+    .sort((a, b) => (b.reputationScore ?? 0) - (a.reputationScore ?? 0))
+    .slice(0, 10);
+});
+
+const FETCHABLE_SCHEMES = new Set<string>(["http", "ipfs"]);
+const topAgentMeta = ref(new Map<string, { name: string; imageSrc: string | null }>());
+
+watch(topAgents, async (agents) => {
+  if (agents.length === 0) return;
+
+  const map = new Map<string, { name: string; imageSrc: string | null }>();
+
+  await Promise.all(
+    agents.map(async (agent) => {
+      if (!agent.agentUri) {
+        map.set(agent.agentId, { name: `Agent ${agent.agentId}`, imageSrc: null });
+        return;
+      }
+
+      let resolved = resolveAgentUri(agent.agentUri);
+
+      if (needsAsyncDataResolve(resolved)) {
+        try {
+          resolved = await resolveDataUriAsync(agent.agentUri);
+        } catch {
+          // fallback
+        }
+      }
+
+      if (FETCHABLE_SCHEMES.has(resolved.scheme) && resolved.decoded === null) {
+        try {
+          const fetched = await api.resolveUri(resolved.raw);
+          if (fetched.contentType === "application/json" && fetched.body !== null) {
+            resolved = { scheme: resolved.scheme, raw: resolved.raw, decoded: fetched.body, error: null };
+          }
+        } catch {
+          // fallback
+        }
+      }
+
+      const metadata = extractAgentUriMetadata(resolved.decoded);
+      const rawImage = metadata.image;
+      let imageSrc: string | null = null;
+      if (rawImage) {
+        imageSrc = rawImage.startsWith("data:") ? rawImage : api.imageProxyUrl(rawImage);
+      }
+
+      map.set(agent.agentId, {
+        name: metadata.name ?? `Agent ${agent.agentId}`,
+        imageSrc,
+      });
+    }),
+  );
+
+  topAgentMeta.value = map;
+}, { immediate: true });
+
+function agentName(agent: TopAgentSummary): string {
+  return topAgentMeta.value.get(agent.agentId)?.name ?? `Agent ${agent.agentId}`;
+}
+
+function agentImage(agent: TopAgentSummary): string | null {
+  return topAgentMeta.value.get(agent.agentId)?.imageSrc ?? null;
+}
+
+const topAgentHeaders = [
+  { title: "", key: "image", sortable: false, width: "40px" },
+  { title: "Agent", key: "name" },
+  { title: "Reputation", key: "reputationScore", width: "100px" },
+  { title: "Client Diversity", key: "clientDiversity", width: "120px" },
+  { title: "Feedback", key: "value", width: "90px" },
+];
 </script>
 
 <template>
@@ -102,28 +175,33 @@ const pointHeuristicRows = computed(() => {
       empty-description="Analytics series are not available yet."
       @retry="state.refresh"
     >
-      <v-card border class="mb-3">
-        <v-card-title>
-          Heuristics
-          <span class="heuristic-hint">24h / 7d / 30d</span>
-        </v-card-title>
-        <v-card-text>
-          <div v-for="row in windowedHeuristicRows" :key="row.label" class="heuristic-row">
-            <span>{{ row.label }}</span>
-            <strong>{{ row.value }}</strong>
-          </div>
-          <div v-for="row in pointHeuristicRows" :key="row.label" class="heuristic-row">
-            <span>{{ row.label }}</span>
-            <strong>{{ row.value }}</strong>
-          </div>
-        </v-card-text>
-      </v-card>
-
-      <!-- Primary time-series charts -->
+      <!-- Row 1: Heuristics + Registrations chart -->
       <v-row dense>
-        <v-col cols="12" md="4">
+        <v-col cols="12" md="5">
+          <v-card border class="fill-height">
+            <v-card-title>
+              Heuristics
+              <span class="heuristic-hint">24h / 7d / 30d</span>
+            </v-card-title>
+            <v-card-text>
+              <div v-for="row in windowedHeuristicRows" :key="row.label" class="heuristic-row">
+                <span>{{ row.label }}</span>
+                <strong>{{ row.value }}</strong>
+              </div>
+              <div v-for="row in pointHeuristicRows" :key="row.label" class="heuristic-row">
+                <span>{{ row.label }}</span>
+                <strong>{{ row.value }}</strong>
+              </div>
+            </v-card-text>
+          </v-card>
+        </v-col>
+        <v-col cols="12" md="7">
           <LineSeriesChart title="Agent Registrations" :points="state.data.value?.charts.registrations ?? []" :state="registrationsState.state" />
         </v-col>
+      </v-row>
+
+      <!-- Row 2: 3 primary charts -->
+      <v-row dense class="mt-2">
         <v-col cols="12" md="4">
           <LineSeriesChart title="Feedback Volume" :points="state.data.value?.charts.feedbackVolume ?? []" :state="feedbackVolumeState.state" color="#ff7a45" />
         </v-col>
@@ -135,95 +213,91 @@ const pointHeuristicRows = computed(() => {
         </v-col>
       </v-row>
 
-      <!-- Secondary analytics — collapsed by default -->
-      <v-expansion-panels class="mt-3" variant="accordion">
-        <v-expansion-panel title="Secondary Analytics">
-          <v-expansion-panel-text>
-            <v-row dense>
-              <v-col cols="12" md="4">
-                <LineSeriesChart title="Active Agents (30d)" :points="state.data.value?.charts.activeAgents ?? []" :state="activeAgentsState.state" color="#1d4ed8" />
-              </v-col>
-              <v-col cols="12" md="4">
-                <LineSeriesChart title="Client Growth" :points="state.data.value?.charts.clientGrowth ?? []" :state="clientGrowthState.state" color="#0b5e67" />
-              </v-col>
-              <v-col cols="12" md="4">
-                <LineSeriesChart title="Responder Growth" :points="state.data.value?.charts.responderGrowth ?? []" :state="responderGrowthState.state" color="#065f46" />
-              </v-col>
-              <v-col cols="12" md="4">
-                <LineSeriesChart title="Integrity Health" :points="state.data.value?.charts.integrityHealth ?? []" :state="integrityHealthState.state" color="#0284c7" />
-              </v-col>
-              <v-col cols="12" md="4">
-                <LineSeriesChart title="Agent Feedback Velocity" :points="state.data.value?.charts.selectedAgentFeedbackVelocity ?? []" :state="feedbackVelocityState.state" color="#334155" />
-              </v-col>
-            </v-row>
-          </v-expansion-panel-text>
-        </v-expansion-panel>
-      </v-expansion-panels>
-
-      <!-- Revocation — collapsed, last -->
-      <v-expansion-panels class="mt-3" variant="accordion">
-        <v-expansion-panel title="Revocation (Low Activity)">
-          <v-expansion-panel-text>
-            <v-row dense>
-              <v-col cols="12" md="4">
-                <div class="heuristic-cell">
-                  <span class="heuristic-label">Revocation Rate</span>
-                  <strong class="heuristic-value">{{ formatComputedPercent(state.data.value?.heuristics.revocationRate) }}</strong>
-                </div>
-              </v-col>
-              <v-col cols="12" md="8">
-                <LineSeriesChart title="Revocation Volume" :points="state.data.value?.charts.revocationVolume ?? []" :state="revocationVolumeState.state" color="#b42318" />
-              </v-col>
-            </v-row>
-          </v-expansion-panel-text>
-        </v-expansion-panel>
-      </v-expansion-panels>
-
-      <v-row dense class="mt-2">
-        <v-col cols="12" md="4">
-          <v-card border>
-            <v-card-title>Top Agents by Feedback</v-card-title>
-            <v-card-text>
-              <v-list density="compact">
-                <v-list-item
-                  v-for="row in state.data.value?.charts.topAgentsByFeedback.slice(0, 15) ?? []"
-                  :key="row.agentId"
-                >
-                  <template #title>Agent {{ row.agentId }}</template>
-                  <template #append>{{ formatNumber(row.value) }}</template>
-                </v-list-item>
-              </v-list>
-            </v-card-text>
-          </v-card>
-        </v-col>
-
-        <v-col cols="12" md="4">
-          <HeatmapTable title="Tag Heatmap" :rows="state.data.value?.charts.tagHeatmap ?? []" />
-        </v-col>
-
-        <v-col cols="12" md="4">
-          <HeatmapTable title="Endpoint Heatmap" :rows="state.data.value?.charts.endpointHeatmap ?? []" />
-        </v-col>
-      </v-row>
-
+      <!-- Row 3: Top Agents tables -->
       <v-row dense class="mt-2">
         <v-col cols="12" md="6">
           <v-card border>
-            <v-card-title>Protocol Distribution</v-card-title>
-            <v-card-text>
-              <v-list density="compact">
-                <v-list-item
-                  v-for="row in state.data.value?.charts.protocolDistribution ?? []"
-                  :key="`protocol-${row.label}`"
-                >
-                  <template #title>{{ row.label }}</template>
-                  <template #append>{{ formatNumber(row.value) }}</template>
-                </v-list-item>
-              </v-list>
-            </v-card-text>
+            <v-card-title>Top Agents By Feedback</v-card-title>
+            <v-data-table
+              :headers="topAgentHeaders"
+              :items="topAgents.slice(0, 10)"
+              :items-per-page="-1"
+              density="comfortable"
+              hide-default-footer
+            >
+              <template #item.image="{ item }">
+                <v-avatar size="28" class="my-1">
+                  <v-img v-if="agentImage(item)" :src="agentImage(item)!" />
+                  <v-icon v-else size="20">mdi-robot</v-icon>
+                </v-avatar>
+              </template>
+              <template #item.name="{ item }">
+                <a :href="`/agents/${item.agentId}`" class="agent-link">{{ agentName(item) }}</a>
+              </template>
+              <template #item.reputationScore="{ item }">
+                <template v-if="item.reputationScore !== null">{{ formatNumber(item.reputationScore) }}</template>
+                <span v-else class="text-medium-emphasis">-</span>
+              </template>
+              <template #item.clientDiversity="{ item }">
+                <template v-if="item.clientDiversity !== null">{{ formatPercent(item.clientDiversity) }}</template>
+                <span v-else class="text-medium-emphasis">-</span>
+              </template>
+              <template #item.value="{ item }">{{ formatNumber(item.value) }}</template>
+            </v-data-table>
           </v-card>
         </v-col>
 
+        <v-col cols="12" md="6">
+          <v-card border>
+            <v-card-title>Top Agents By Reputation</v-card-title>
+            <v-data-table
+              :headers="topAgentHeaders"
+              :items="topAgentsByReputation"
+              :items-per-page="-1"
+              density="comfortable"
+              hide-default-footer
+            >
+              <template #item.image="{ item }">
+                <v-avatar size="28" class="my-1">
+                  <v-img v-if="agentImage(item)" :src="agentImage(item)!" />
+                  <v-icon v-else size="20">mdi-robot</v-icon>
+                </v-avatar>
+              </template>
+              <template #item.name="{ item }">
+                <a :href="`/agents/${item.agentId}`" class="agent-link">{{ agentName(item) }}</a>
+              </template>
+              <template #item.reputationScore="{ item }">
+                <template v-if="item.reputationScore !== null">{{ formatNumber(item.reputationScore) }}</template>
+                <span v-else class="text-medium-emphasis">-</span>
+              </template>
+              <template #item.clientDiversity="{ item }">
+                <template v-if="item.clientDiversity !== null">{{ formatPercent(item.clientDiversity) }}</template>
+                <span v-else class="text-medium-emphasis">-</span>
+              </template>
+              <template #item.value="{ item }">{{ formatNumber(item.value) }}</template>
+            </v-data-table>
+          </v-card>
+        </v-col>
+      </v-row>
+
+      <!-- Row 4: Secondary charts -->
+      <v-row dense class="mt-2">
+        <v-col cols="12" md="4">
+          <LineSeriesChart title="Active Agents (30d)" :points="state.data.value?.charts.activeAgents ?? []" :state="activeAgentsState.state" color="#1d4ed8" />
+        </v-col>
+        <v-col cols="12" md="4">
+          <LineSeriesChart title="Client Growth" :points="state.data.value?.charts.clientGrowth ?? []" :state="clientGrowthState.state" color="#0b5e67" />
+        </v-col>
+        <v-col cols="12" md="4">
+          <LineSeriesChart title="Responder Growth" :points="state.data.value?.charts.responderGrowth ?? []" :state="responderGrowthState.state" color="#065f46" />
+        </v-col>
+      </v-row>
+
+      <!-- Row 5: Heatmap + Time to First Feedback -->
+      <v-row dense class="mt-2">
+        <v-col cols="12" md="6">
+          <HeatmapTable title="Tag Heatmap" :rows="state.data.value?.charts.tagHeatmap ?? []" />
+        </v-col>
         <v-col cols="12" md="6">
           <v-card border>
             <v-card-title>Time to First Feedback</v-card-title>
@@ -260,5 +334,14 @@ const pointHeuristicRows = computed(() => {
   font-weight: 400;
   color: var(--color-text-muted);
   margin-left: 0.5rem;
+}
+
+.agent-link {
+  color: var(--color-link);
+  text-decoration: none;
+}
+
+.agent-link:hover {
+  text-decoration: underline;
 }
 </style>
