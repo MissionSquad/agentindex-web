@@ -102,6 +102,18 @@ const agentImageSrc = computed<string | null>(() => {
   if (raw.startsWith("data:")) return raw;
   return api.imageProxyUrl(raw);
 });
+const agentImageFailed = ref(false);
+const displayAgentImageSrc = computed<string | null>(() => {
+  return agentImageFailed.value ? null : agentImageSrc.value;
+});
+
+watch(agentImageSrc, () => {
+  agentImageFailed.value = false;
+}, { immediate: true });
+
+function onAgentImageError(): void {
+  agentImageFailed.value = true;
+}
 
 const reputationScore = computed(() => {
   const score = state.data.value?.heuristics?.reputationScore;
@@ -329,13 +341,17 @@ const parsedRegistrations = computed<ParsedRegistration[]>(() => {
         <v-card-text>
           <div class="header-row">
             <div class="header-identity">
-              <img
-                v-if="agentImageSrc"
-                :src="agentImageSrc"
-                alt=""
-                class="agent-avatar"
-                @error="($event.target as HTMLImageElement).style.display = 'none'"
-              />
+              <div v-if="displayAgentImageSrc" class="agent-avatar-shell">
+                <img
+                  :src="displayAgentImageSrc"
+                  :alt="resolvedMetadata?.name ?? state.data.value?.agent.name ?? 'Agent avatar'"
+                  class="agent-avatar"
+                  @error="onAgentImageError"
+                />
+              </div>
+              <div v-else class="agent-avatar-fallback" aria-hidden="true">
+                <v-icon size="30">mdi-robot</v-icon>
+              </div>
               <div>
                 <div class="title-row">
                   <h1 class="title">{{ resolvedMetadata?.name ?? state.data.value?.agent.name }}</h1>
@@ -842,6 +858,11 @@ const parsedRegistrations = computed<ParsedRegistration[]>(() => {
   gap: 1rem;
 }
 
+.agent-avatar-shell {
+  flex-shrink: 0;
+  line-height: 0;
+}
+
 .agent-avatar {
   width: 64px;
   height: 64px;
@@ -849,6 +870,19 @@ const parsedRegistrations = computed<ParsedRegistration[]>(() => {
   object-fit: cover;
   flex-shrink: 0;
   border: 1px solid var(--color-container-border);
+}
+
+.agent-avatar-fallback {
+  width: 64px;
+  height: 64px;
+  border-radius: 8px;
+  border: 1px solid var(--color-container-border);
+  background: rgba(148, 163, 184, 0.12);
+  color: var(--color-text-muted);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
 }
 
 .chip-group-label {

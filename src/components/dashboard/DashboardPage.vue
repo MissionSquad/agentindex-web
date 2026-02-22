@@ -5,11 +5,12 @@ import CopyButton from "../shared/CopyButton.vue";
 import MetricTile from "../shared/MetricTile.vue";
 import LineSeriesChart from "../shared/LineSeriesChart.vue";
 import { ScannerApiClient } from "../../lib/api-client";
+import { createDashboardActivityStreamClient } from "../../lib/dashboard-activity-stream";
 import { formatNumber, formatPercent, formatTimestamp, formatTxHash } from "../../lib/formatters";
 import { resolveChartState } from "../../lib/chart-state";
 import type { ChartStateContext } from "../../lib/chart-state";
 import { useAsyncView } from "../../lib/view-state";
-import type { AnalyticsOverviewResponse, TimeSeriesPoint, TopAgentSummary } from "../../types/api";
+import type { AnalyticsOverviewResponse, DashboardActivityItem, TimeSeriesPoint, TopAgentSummary } from "../../types/api";
 
 const THREE_DAYS_MS = 3 * 24 * 60 * 60 * 1000;
 
@@ -29,16 +30,40 @@ const readViewport = (): void => {
 onMounted(() => {
   readViewport();
   window.addEventListener("resize", readViewport);
+  activityFeedStream.start();
 });
 
 onBeforeUnmount(() => {
   window.removeEventListener("resize", readViewport);
+  activityFeedStream.stop();
 });
 
 const state = useAsyncView<AnalyticsOverviewResponse>(
   () => api.getAnalyticsOverview(),
   (payload) => payload.activityFeed.length === 0 && payload.dashboardMetrics.totalRegisteredAgents === 0,
 );
+
+function mergeActivityFeedItems(
+  existing: DashboardActivityItem[],
+  incoming: DashboardActivityItem,
+): DashboardActivityItem[] {
+  const dedupedExisting = existing.filter((item) =>
+    !(item.chainId === incoming.chainId && item.txHash === incoming.txHash && item.logIndex === incoming.logIndex),
+  );
+  return [incoming, ...dedupedExisting];
+}
+
+const activityFeedStream = createDashboardActivityStreamClient({
+  onActivity: (incomingItem) => {
+    const current = state.data.value;
+    if (!current) return;
+
+    state.data.value = {
+      ...current,
+      activityFeed: mergeActivityFeedItems(current.activityFeed, incomingItem),
+    };
+  },
+});
 
 const chartCtx = computed<ChartStateContext>(() => ({
   dashboardMetrics: state.data.value?.dashboardMetrics ?? {
@@ -95,6 +120,31 @@ const topAgentsByReputation = computed(() => {
     .slice(0, 10);
 });
 const activityFeed = computed(() => state.data.value?.activityFeed ?? []);
+const failedImageUrls = ref<Set<string>>(new Set());
+
+function markImageUrlAsFailed(url: string): void {
+  const normalized = url.trim();
+  if (normalized.length === 0 || failedImageUrls.value.has(normalized)) {
+    return;
+  }
+
+  const next = new Set(failedImageUrls.value);
+  next.add(normalized);
+  failedImageUrls.value = next;
+}
+
+function onImageLoadError(failedUrl: string | undefined): void {
+  if (!failedUrl) return;
+  markImageUrlAsFailed(failedUrl);
+}
+
+function toDisplayImageUrl(raw: string): string | null {
+  const resolved = raw.startsWith("data:") ? raw : api.imageProxyUrl(raw);
+  if (!resolved || failedImageUrls.value.has(resolved)) {
+    return null;
+  }
+  return resolved;
+}
 
 function agentName(agent: TopAgentSummary): string {
   return agent.name ?? `Agent ${agent.agentId}`;
@@ -102,8 +152,23 @@ function agentName(agent: TopAgentSummary): string {
 
 function agentImage(agent: TopAgentSummary): string | null {
   if (!agent.imageUrl) return null;
-  if (agent.imageUrl.startsWith("data:")) return agent.imageUrl;
-  return api.imageProxyUrl(agent.imageUrl);
+  return toDisplayImageUrl(agent.imageUrl);
+}
+
+function activityAgentDisplayName(item: DashboardActivityItem): string | null {
+  const name = item.agentName?.trim();
+  if (name && name.length > 0) return name;
+  if (item.agentId) return `Agent ${item.agentId}`;
+  return null;
+}
+
+function activityAgentImage(item: DashboardActivityItem): string | null {
+  if (!item.agentImageUrl) return null;
+  return toDisplayImageUrl(item.agentImageUrl);
+}
+
+function hasActivityAgent(item: DashboardActivityItem): boolean {
+  return activityAgentDisplayName(item) !== null;
 }
 
 const topAgentHeaders = [
@@ -117,6 +182,25 @@ const topAgentHeaders = [
 interface SummarySegment {
   type: "text" | "address";
   value: string;
+}
+
+const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
+
+function hasSummary(text: string): boolean {
+  return text.trim().length > 0;
+}
+
+function isZeroAddress(address: string): boolean {
+  return address.toLowerCase() === ZERO_ADDRESS;
+}
+
+function formatActivityAddress(address: string): string {
+  const normalized = address.trim();
+  if (!/^0x[a-fA-F0-9]{40}$/.test(normalized)) {
+    return normalized;
+  }
+
+  return `${normalized.slice(0, 10)}...${normalized.slice(-8)}`;
 }
 
 function parseSummary(text: string): SummarySegment[] {
@@ -174,7 +258,7 @@ function parseSummary(text: string): SummarySegment[] {
             >
               <template #item.image="{ item }">
                 <v-avatar size="28" class="my-1">
-                  <v-img v-if="agentImage(item)" :src="agentImage(item)!" />
+                  <v-img v-if="agentImage(item)" :src="agentImage(item)!" @error="onImageLoadError" />
                   <v-icon v-else size="20">mdi-robot</v-icon>
                 </v-avatar>
               </template>
@@ -206,7 +290,7 @@ function parseSummary(text: string): SummarySegment[] {
             >
               <template #item.image="{ item }">
                 <v-avatar size="28" class="my-1">
-                  <v-img v-if="agentImage(item)" :src="agentImage(item)!" />
+                  <v-img v-if="agentImage(item)" :src="agentImage(item)!" @error="onImageLoadError" />
                   <v-icon v-else size="20">mdi-robot</v-icon>
                 </v-avatar>
               </template>
@@ -233,20 +317,54 @@ function parseSummary(text: string): SummarySegment[] {
             <v-card-title>Live Activity Feed</v-card-title>
             <v-card-text>
               <v-list density="compact">
-                <v-list-item v-for="item in activityFeed" :key="`${item.txHash}:${item.timestamp}`">
-                  <template #title>{{ item.eventName }}</template>
-                  <template #subtitle>
-                    <span>
-                      <template v-for="(seg, i) in parseSummary(item.summary)" :key="i">
-                        <a v-if="seg.type === 'address'" :href="`/address/${seg.value.toLowerCase()}`">{{ seg.value }}</a>
-                        <span v-else>{{ seg.value }}</span>
+                <TransitionGroup name="activity-feed" tag="div">
+                  <v-list-item
+                    v-for="item in activityFeed"
+                    :key="`${item.chainId}:${item.txHash}:${item.logIndex}`"
+                    class="activity-feed-item"
+                  >
+                    <div class="activity-feed-line">
+                      <span class="activity-event-name">{{ item.eventName }}</span>
+                      <template v-if="hasActivityAgent(item)">
+                        <span class="activity-separator">·</span>
+                        <span class="activity-agent">
+                          <v-avatar size="18" class="activity-agent-avatar">
+                            <v-img
+                              v-if="activityAgentImage(item)"
+                              :src="activityAgentImage(item)!"
+                              @error="onImageLoadError"
+                            />
+                            <v-icon v-else size="13">mdi-robot</v-icon>
+                          </v-avatar>
+                          <a v-if="item.agentId" :href="`/agents/${item.agentId}`" class="activity-agent-link">
+                            {{ activityAgentDisplayName(item) }}
+                          </a>
+                          <span v-else class="activity-agent-label">{{ activityAgentDisplayName(item) }}</span>
+                        </span>
                       </template>
-                      · {{ formatTimestamp(item.timestamp) }} ·
+                      <template v-if="hasSummary(item.summary)">
+                        <span class="activity-separator">·</span>
+                        <span class="activity-summary">
+                          <template v-for="(seg, i) in parseSummary(item.summary)" :key="i">
+                            <a
+                              v-if="seg.type === 'address' && !isZeroAddress(seg.value)"
+                              :href="`/address/${seg.value.toLowerCase()}`"
+                            >
+                              {{ formatActivityAddress(seg.value) }}
+                            </a>
+                            <span v-else-if="seg.type === 'address'">{{ formatActivityAddress(seg.value) }}</span>
+                            <span v-else>{{ seg.value }}</span>
+                          </template>
+                        </span>
+                      </template>
+                      <span class="activity-separator">·</span>
+                      <span>{{ formatTimestamp(item.timestamp) }}</span>
+                      <span class="activity-separator">·</span>
                       <a :href="`/tx/${item.txHash}`">{{ formatTxHash(item.txHash) }}</a>
                       <CopyButton :value="item.txHash" />
-                    </span>
-                  </template>
-                </v-list-item>
+                    </div>
+                  </v-list-item>
+                </TransitionGroup>
               </v-list>
             </v-card-text>
           </v-card>
@@ -291,5 +409,68 @@ function parseSummary(text: string): SummarySegment[] {
 
 .agent-link:hover {
   text-decoration: underline;
+}
+
+.activity-feed-item {
+  min-height: 36px;
+}
+
+.activity-feed-item + .activity-feed-item {
+  border-top: 1px solid rgba(148, 163, 184, 0.22);
+}
+
+.activity-feed-line {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  line-height: 1.35;
+}
+
+.activity-event-name {
+  font-weight: 600;
+}
+
+.activity-agent {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.activity-agent-label {
+  font-weight: 500;
+}
+
+.activity-separator {
+  opacity: 0.65;
+}
+
+.activity-summary {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.1rem;
+}
+
+.activity-feed-line a {
+  color: var(--color-link);
+  text-decoration: none;
+}
+
+.activity-feed-line a:hover {
+  text-decoration: underline;
+}
+
+.activity-feed-enter-active {
+  transition: transform 240ms ease, opacity 240ms ease;
+}
+
+.activity-feed-enter-from {
+  transform: translateY(-12px);
+  opacity: 0;
+}
+
+.activity-feed-move {
+  transition: transform 240ms ease;
 }
 </style>

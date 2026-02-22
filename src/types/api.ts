@@ -348,6 +348,22 @@ export interface TopAgentSummary {
   clientDiversity: number | null;
 }
 
+export interface DashboardActivityItem {
+  chainId: number;
+  eventName: string;
+  agentId: string | null;
+  agentName: string | null;
+  agentImageUrl: string | null;
+  txHash: string;
+  logIndex: number;
+  timestamp: number;
+  summary: string;
+}
+
+export type DashboardActivityStreamMessage =
+  | { type: "connected"; timestamp: number }
+  | { type: "activity"; item: DashboardActivityItem };
+
 export interface ResolvedAgentMetadata {
   links: ResolvedMetadataLink[];
   name: string | null;
@@ -412,13 +428,7 @@ export interface AnalyticsOverviewResponse {
     timeToFirstFeedbackDistribution: Array<{ label: string; value: number }>;
     selectedAgentFeedbackVelocity: TimeSeriesPoint[];
   };
-  activityFeed: Array<{
-    eventName: string;
-    agentId: string | null;
-    txHash: string;
-    timestamp: number;
-    summary: string;
-  }>;
+  activityFeed: DashboardActivityItem[];
 }
 
 export interface NetworkNodeInput {

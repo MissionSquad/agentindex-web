@@ -9,6 +9,7 @@ import {
   type AnalyticsOverviewResponse,
   type ApiErrorPayload,
   type CallFact,
+  type DashboardActivityItem,
   type EventFact,
   type FeedbackEntry,
   type HealthResponse,
@@ -624,13 +625,23 @@ function parseAnalyticsOverviewResponse(value: unknown): AnalyticsOverviewRespon
         parseTimeSeriesPoint(entry),
       ),
     },
-    activityFeed: toRecordArray(record.activityFeed).map((entry) => ({
-      eventName: toStringValue(entry.eventName),
-      agentId: typeof entry.agentId === "string" ? entry.agentId : null,
-      txHash: toStringValue(entry.txHash),
-      timestamp: toNumberValue(entry.timestamp),
-      summary: toStringValue(entry.summary),
-    })),
+    activityFeed: toRecordArray(record.activityFeed).map((entry) => parseDashboardActivityItem(entry)),
+  };
+}
+
+function parseDashboardActivityItem(value: unknown): DashboardActivityItem {
+  const record = asRecord(value);
+
+  return {
+    chainId: toNumberValue(record.chainId, 1),
+    eventName: toStringValue(record.eventName),
+    agentId: typeof record.agentId === "string" ? record.agentId : null,
+    agentName: typeof record.agentName === "string" ? record.agentName : null,
+    agentImageUrl: typeof record.agentImageUrl === "string" ? record.agentImageUrl : null,
+    txHash: toStringValue(record.txHash),
+    logIndex: toNumberValue(record.logIndex, -1),
+    timestamp: toNumberValue(record.timestamp),
+    summary: toStringValue(record.summary),
   };
 }
 
@@ -1096,12 +1107,19 @@ export class ScannerApiClient {
   }
 
   /**
-   * Build an absolute URL for the image proxy endpoint.
-   * Returns null for data: URIs (render directly) or empty input.
+   * Resolve an image URL for rendering.
+   * - `data:` URIs are rendered directly by the client (`null` => caller should use raw value).
+   * - Other schemes are routed through `/v1/resolve/image` for a consistent server-side fetch path.
    */
   public imageProxyUrl(imageUri: string): string | null {
-    if (!imageUri || imageUri.startsWith("data:")) return null;
-    return `${this.baseUrl}/v1/resolve/image?url=${encodeURIComponent(imageUri)}`;
+    if (!imageUri) return null;
+
+    const trimmed = imageUri.trim();
+    if (trimmed.length === 0 || trimmed.startsWith("data:")) {
+      return null;
+    }
+
+    return `${this.baseUrl}/v1/resolve/image?url=${encodeURIComponent(trimmed)}`;
   }
 
   public async resolveUri(url: string): Promise<ResolveUriResponse> {
