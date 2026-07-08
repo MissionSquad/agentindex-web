@@ -9,7 +9,7 @@ interface EndpointInfo {
   price: string;
 }
 
-const x402BaseUrl = "https://x402.agentlist.space";
+const x402BaseUrl = "https://x402.agentindex.space";
 
 const endpoints: EndpointInfo[] = [
   {
@@ -39,7 +39,7 @@ const endpointHeaders = [
   { title: "Price", key: "price", sortable: false },
 ];
 
-const curlExample = `curl -i "https://x402.agentlist.space/v1/search?q=chatbot"`;
+const curlExample = `curl -i "https://x402.agentindex.space/v1/search?q=chatbot"`;
 
 const responseExample = `HTTP/1.1 402 Payment Required
 X-Payment-Network: eip155:8453
@@ -65,7 +65,8 @@ Content-Type: application/json
       <v-card-title>x402 API Access</v-card-title>
       <v-card-text>
         AgentIndex search endpoints are available via <strong>x402 micropayments</strong> on a dedicated subdomain.
-        Each request costs 0.02 USDC on Base. No API keys, no subscriptions &mdash; pay per request with on-chain settlement.
+        Each request costs 0.02 USDC on Base. No API keys, no subscriptions &mdash; pay per request with on-chain
+        settlement.
       </v-card-text>
     </v-card>
 
@@ -94,13 +95,8 @@ Content-Type: application/json
     <!-- Endpoints table -->
     <v-card border class="mb-4">
       <v-card-title>Protected Endpoints</v-card-title>
-      <v-data-table
-        :headers="endpointHeaders"
-        :items="endpoints"
-        :items-per-page="-1"
-        density="comfortable"
-        hide-default-footer
-      >
+      <v-data-table :headers="endpointHeaders" :items="endpoints" :items-per-page="-1" density="comfortable"
+        hide-default-footer>
         <template #item.method="{ item }">
           <v-chip size="small" color="primary" variant="tonal">{{ item.method }}</v-chip>
         </template>
@@ -115,7 +111,8 @@ Content-Type: application/json
 
     <!-- Free endpoints -->
     <v-alert type="info" variant="tonal" border class="mb-4">
-      <strong>Free Endpoints</strong> &mdash; The following endpoints are not paywalled and remain accessible on the main API:
+      <strong>Free Endpoints</strong> &mdash; The following endpoints are not paywalled and remain accessible on the
+      main API:
       <ul class="mt-2 mb-0">
         <li><code>GET /v1/agents/:agentId</code> &mdash; Individual agent lookup</li>
         <li><code>GET /v1/health</code> &mdash; Health check</li>
@@ -130,13 +127,14 @@ Content-Type: application/json
           <v-timeline-item dot-color="primary" size="small">
             <div><strong>1. Request</strong></div>
             <div class="text-body-2" style="color: var(--color-text-secondary)">
-              Client sends a normal GET request to <code>x402.agentlist.space</code>.
+              Client sends a normal GET request to <code>x402.agentindex.space</code>.
             </div>
           </v-timeline-item>
           <v-timeline-item dot-color="warning" size="small">
             <div><strong>2. Challenge</strong></div>
             <div class="text-body-2" style="color: var(--color-text-secondary)">
-              Server responds with HTTP <code>402 Payment Required</code> and includes payment details (network, token, amount, recipient) in headers.
+              Server responds with HTTP <code>402 Payment Required</code> and includes payment details (network, token,
+              amount, recipient) in headers.
             </div>
           </v-timeline-item>
           <v-timeline-item dot-color="info" size="small">
